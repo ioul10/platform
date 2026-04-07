@@ -101,21 +101,7 @@ st.markdown("""
         margin-top: 0.5rem;
     }
     
-    /* Detail panel */
-    .detail-panel {
-        background: linear-gradient(145deg, rgba(17,24,39,0.8), rgba(17,24,39,0.4));
-        border: 1px solid rgba(212,168,67,0.15);
-        border-radius: 16px;
-        padding: 2rem;
-        margin: 1rem 0;
-    }
-    
-    .detail-grid {
-        display: grid;
-        grid-template-columns: repeat(2, 1fr);
-        gap: 0;
-    }
-    
+    /* Detail rows */
     .detail-row {
         display: flex;
         justify-content: space-between;
@@ -217,59 +203,37 @@ c = futures[selected]
 var = c.get("variation", 0)
 var_class = "up" if var >= 0 else "down"
 var_sign = "+" if var >= 0 else ""
+var_color = "#10B981" if var >= 0 else "#EF4444"
 
+# Header section
 st.markdown(f"""
-<div class="detail-panel">
-    <div style="text-align:center; margin-bottom:1.5rem;">
-        <div style="font-family:'Space Mono',monospace; color:#D4A843; font-size:1.1rem; letter-spacing:2px;">
-            FUTURE MASI 20 — {c.get('label', selected.split('-')[-1]).upper()}
-        </div>
-        <div style="font-family:'Space Mono',monospace; color:#E5E7EB; font-size:2.5rem; font-weight:700; margin:0.5rem 0;">
-            {c['cours']:,.2f} <span style="font-size:1rem; color:#6B7280;">MAD</span>
-        </div>
-        <div class="{var_class}" style="font-family:'Space Mono',monospace; font-size:1.1rem; font-weight:700;">
-            {var_sign}{var:.2f}%
-        </div>
-    </div>
-    
-    <div class="detail-grid">
-        <div>
-            <div class="detail-row">
-                <span class="detail-label">Cours (MAD)</span>
-                <span class="detail-value">{c['cours']:,.2f}</span>
-            </div>
-            <div class="detail-row">
-                <span class="detail-label">Variation</span>
-                <span class="detail-value {var_class}">{var_sign}{var:.2f}%</span>
-            </div>
-            <div class="detail-row">
-                <span class="detail-label">Ouverture</span>
-                <span class="detail-value">{c.get('ouverture', 'N/A')}</span>
-            </div>
-            <div class="detail-row">
-                <span class="detail-label">Plus haut</span>
-                <span class="detail-value">{c.get('plus_haut', 'N/A')}</span>
-            </div>
-        </div>
-        <div>
-            <div class="detail-row">
-                <span class="detail-label">Plus bas</span>
-                <span class="detail-value">{c.get('plus_bas', 'N/A')}</span>
-            </div>
-            <div class="detail-row">
-                <span class="detail-label">Clôture veille</span>
-                <span class="detail-value">{c.get('cloture_veille', c.get('prix_initial', 'N/A'))}</span>
-            </div>
-            <div class="detail-row">
-                <span class="detail-label">Volume (MAD)</span>
-                <span class="detail-value">{c.get('volume_mad', 0):,.2f}</span>
-            </div>
-            <div class="detail-row">
-                <span class="detail-label">Nombre de contrats</span>
-                <span class="detail-value">{c.get('nb_contrats', c.get('volume_titres', 0))}</span>
-            </div>
-        </div>
-    </div>
+<div style="background:linear-gradient(145deg,rgba(17,24,39,0.8),rgba(17,24,39,0.4));border:1px solid rgba(212,168,67,0.15);border-radius:16px;padding:2rem;margin:1rem 0;text-align:center;">
+<div style="font-family:'Space Mono',monospace;color:#D4A843;font-size:1.1rem;letter-spacing:2px;">FUTURE MASI 20 — {c.get('label', selected.split('-')[-1]).upper()}</div>
+<div style="font-family:'Space Mono',monospace;color:#E5E7EB;font-size:2.5rem;font-weight:700;margin:0.5rem 0;">{c['cours']:,.2f} <span style="font-size:1rem;color:#6B7280;">MAD</span></div>
+<div style="font-family:'Space Mono',monospace;font-size:1.1rem;font-weight:700;color:{var_color};">{var_sign}{var:.2f}%</div>
+</div>
+""", unsafe_allow_html=True)
+
+# Detail rows using st.columns
+detail_left, detail_right = st.columns(2)
+
+with detail_left:
+    st.markdown(f"""
+<div style="background:rgba(17,24,39,0.5);border-radius:12px;padding:1rem;">
+<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.04);"><span style="color:#6B7280;font-family:'DM Sans',sans-serif;font-size:0.88rem;">Cours (MAD)</span><span style="color:#E5E7EB;font-family:'Space Mono',monospace;font-size:0.88rem;">{c['cours']:,.2f}</span></div>
+<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.04);"><span style="color:#6B7280;font-family:'DM Sans',sans-serif;font-size:0.88rem;">Variation</span><span style="color:{var_color};font-family:'Space Mono',monospace;font-size:0.88rem;">{var_sign}{var:.2f}%</span></div>
+<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.04);"><span style="color:#6B7280;font-family:'DM Sans',sans-serif;font-size:0.88rem;">Ouverture</span><span style="color:#E5E7EB;font-family:'Space Mono',monospace;font-size:0.88rem;">{c.get('ouverture', 'N/A')}</span></div>
+<div style="display:flex;justify-content:space-between;padding:8px 0;"><span style="color:#6B7280;font-family:'DM Sans',sans-serif;font-size:0.88rem;">Plus haut</span><span style="color:#E5E7EB;font-family:'Space Mono',monospace;font-size:0.88rem;">{c.get('plus_haut', 'N/A')}</span></div>
+</div>
+""", unsafe_allow_html=True)
+
+with detail_right:
+    st.markdown(f"""
+<div style="background:rgba(17,24,39,0.5);border-radius:12px;padding:1rem;">
+<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.04);"><span style="color:#6B7280;font-family:'DM Sans',sans-serif;font-size:0.88rem;">Plus bas</span><span style="color:#E5E7EB;font-family:'Space Mono',monospace;font-size:0.88rem;">{c.get('plus_bas', 'N/A')}</span></div>
+<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.04);"><span style="color:#6B7280;font-family:'DM Sans',sans-serif;font-size:0.88rem;">Clôture veille</span><span style="color:#E5E7EB;font-family:'Space Mono',monospace;font-size:0.88rem;">{c.get('cloture_veille', c.get('prix_initial', 'N/A'))}</span></div>
+<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.04);"><span style="color:#6B7280;font-family:'DM Sans',sans-serif;font-size:0.88rem;">Volume (MAD)</span><span style="color:#E5E7EB;font-family:'Space Mono',monospace;font-size:0.88rem;">{c.get('volume_mad', 0):,.2f}</span></div>
+<div style="display:flex;justify-content:space-between;padding:8px 0;"><span style="color:#6B7280;font-family:'DM Sans',sans-serif;font-size:0.88rem;">Nombre de contrats</span><span style="color:#E5E7EB;font-family:'Space Mono',monospace;font-size:0.88rem;">{c.get('nb_contrats', c.get('volume_titres', 0))}</span></div>
 </div>
 """, unsafe_allow_html=True)
 
