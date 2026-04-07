@@ -405,7 +405,7 @@ def get_market_status():
         remaining = close_time - now
         return {
             "status": "OUVERTE",
-            "message": f"Séance en cours — Fermeture à 15:30",
+            "message": "Séance en cours — Fermeture à 15:30",
             "remaining": str(remaining).split(".")[0],
         }
     else:
