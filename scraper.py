@@ -405,13 +405,12 @@ def get_market_status():
         remaining = close_time - now
         return {
             "status": "OUVERTE",
-            "message": f"Séance en cours — Fermeture à 15:30",
+            "message": "Séance en cours — Fermeture à 15:30",
             "remaining": str(remaining).split(".")[0],
         }
     else:
-        # Calculate next opening
         weekday = now.weekday()
-        if weekday >= 5:  # Weekend
+        if weekday >= 5:
             days_until = 7 - weekday
         elif now.hour >= 16:
             days_until = 1 if weekday < 4 else (7 - weekday)
