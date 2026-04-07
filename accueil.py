@@ -388,7 +388,7 @@ st.markdown(f"""
         <div class="metric-label">Contrats Futures</div>
     </div>
     <div class="metric-item">
-        <div class="metric-value">680</div>
+        <div class="metric-value">1 295</div>
         <div class="metric-label">Contrats échangés</div>
     </div>
 </div>
