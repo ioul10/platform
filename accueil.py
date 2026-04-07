@@ -7,6 +7,9 @@ import streamlit as st
 from datetime import datetime
 import locale
 from zoneinfo import ZoneInfo
+import streamlit.components.v1 as components
+import zoneinfo
+
 
 # ─── Page Config ───
 st.set_page_config(
@@ -340,10 +343,7 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# ─── Clock & Status Dynamique (GMT+1 Casablanca) ───
-import zoneinfo
-from datetime import datetime
-
+# ─── Clock & Status Dynamique (mise à jour chaque seconde - GMT+1 Casablanca) ───
 casablanca_tz = zoneinfo.ZoneInfo("Africa/Casablanca")
 now = datetime.now(casablanca_tz)
 
@@ -352,33 +352,39 @@ market = get_market_status()
 status_class = "status-open" if market["status"] == "OUVERTE" else "status-closed"
 dot_class = "pulse-green" if market["status"] == "OUVERTE" else "pulse-red"
 
-st.markdown(f"""
-<div class="mat-clock" id="live-clock">{now.strftime("%H:%M:%S")}</div>
-<div class="mat-date">{now.strftime("%A %d %B %Y").capitalize()}</div>
+clock_html = f"""
+<div style="text-align: center; padding: 1rem 0 2rem;">
+    <div class="mat-clock" id="live-clock">{now.strftime("%H:%M:%S")}</div>
+    <div class="mat-date">{now.strftime("%A %d %B %Y").capitalize()}</div>
 
-<div style="text-align:center;">
-    <div class="status-badge {status_class}">
-        <span class="pulse-dot {dot_class}"></span>
-        SÉANCE {market["status"]}
+    <div style="text-align:center;">
+        <div class="status-badge {status_class}">
+            <span class="pulse-dot {dot_class}"></span>
+            SÉANCE {market["status"]}
+        </div>
     </div>
+    <p style="text-align:center; color:#6B7280; font-family:'DM Sans',sans-serif; font-size:0.85rem; margin-top:0.8rem;">
+        {market["message"]}
+    </p>
 </div>
-<p style="text-align:center; color:#6B7280; font-family:'DM Sans',sans-serif; font-size:0.85rem; margin-top:0.8rem;">
-    {market["message"]}
-</p>
 
 <script>
     function updateClock() {{
         const now = new Date();
+        // Force GMT+1 (Africa/Casablanca)
         const casablancaTime = new Date(now.getTime() + (now.getTimezoneOffset() * 60000) + 3600000);
         const hours = String(casablancaTime.getHours()).padStart(2, '0');
         const minutes = String(casablancaTime.getMinutes()).padStart(2, '0');
         const seconds = String(casablancaTime.getSeconds()).padStart(2, '0');
-        document.getElementById("live-clock").textContent = `${{hours}}:${{minutes}}:${{seconds}}`;
+        document.getElementById("live-clock").textContent = hours + ":" + minutes + ":" + seconds;
     }}
+    
     setInterval(updateClock, 1000);
-    updateClock();
+    updateClock();  // Mise à jour immédiate
 </script>
-""", unsafe_allow_html=True)
+"""
+
+components.html(clock_html, height=280, scrolling=False)
 # ─── Key Metrics ───
 masi_data = scrape_masi_index()
 masi_change_class = "metric-change-up" if masi_data.get("masi_var", 0) >= 0 else "metric-change-down"
