@@ -1,0 +1,41 @@
+name: 📊 Update Futures Data
+
+on:
+  schedule:
+    # Run at 15:35 UTC+1 (14:35 UTC) Monday-Friday
+    - cron: '35 14 * * 1-5'
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  update-data:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      
+      - name: Scrape and save data
+        run: |
+          python -c "
+          from scraper import scrape_futures_data, _save_history
+          data = scrape_futures_data()
+          _save_history(data)
+          print('Data updated successfully')
+          print(f'Contracts: {list(data.keys())}')
+          for k, v in data.items():
+              print(f'  {k}: {v.get(\"cours\", \"N/A\")} pts')
+          "
+      
+      - name: Commit and push
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "📊 Auto-update futures data - $(date +'%Y-%m-%d %H:%M')"
+          file_pattern: "data/*.json"
