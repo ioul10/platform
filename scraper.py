@@ -11,6 +11,8 @@ import os
 from datetime import datetime, timedelta
 import random
 import time
+import zoneinfo
+
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")  # ✅ __file__ avec underscoresos.makedirs(DATA_DIR, exist_ok=True)
 
@@ -382,41 +384,49 @@ def generate_masi20_chart_data():
 
 
 def is_market_open():
-    """Check if the Casablanca market is currently open."""
-    now = datetime.now()
-    # Market hours: Mon-Fri 9:30 - 15:30 (Morocco time, UTC+1)
-    weekday = now.weekday()
-    if weekday >= 5:  # Weekend
+    """Check if the Casablanca market is currently open (GMT+1)."""
+    casablanca_tz = zoneinfo.ZoneInfo("Africa/Casablanca")
+    now = datetime.now(casablanca_tz)
+    
+    # Market hours: Monday to Friday, 09:30 → 15:30
+    weekday = now.weekday()      # 0 = lundi, 6 = dimanche
+    if weekday >= 5:             # weekend
         return False
+    
     hour = now.hour
     minute = now.minute
-    market_open = (hour == 9 and minute >= 30) or (10 <= hour <= 14) or (hour == 15 and minute <= 30)
-    return market_open
-
+    
+    # Ouverture : 09:30 - 15:30 inclus
+    return (hour == 9 and minute >= 30) or (10 <= hour <= 14) or (hour == 15 and minute <= 30)
 
 def get_market_status():
-    """Get market status with next open/close time."""
-    now = datetime.now()
+    """Get market status with next open/close time (GMT+1 Casablanca)."""
+    casablanca_tz = zoneinfo.ZoneInfo("Africa/Casablanca")
+    now = datetime.now(casablanca_tz)
     is_open = is_market_open()
     
     if is_open:
-        close_time = now.replace(hour=15, minute=30, second=0)
+        close_time = now.replace(hour=15, minute=30, second=0, microsecond=0)
         remaining = close_time - now
         return {
             "status": "OUVERTE",
-            "message": "Séance en cours — Fermeture à 15:30",
+            "message": f"Séance en cours — Fermeture à 15:30",
             "remaining": str(remaining).split(".")[0],
         }
     else:
+        # Calcul de la prochaine ouverture
         weekday = now.weekday()
-        if weekday >= 5:
+        if weekday >= 5:                    # weekend
             days_until = 7 - weekday
-        elif now.hour >= 16:
+        elif now.hour >= 16 or (now.hour == 15 and now.minute > 30):
             days_until = 1 if weekday < 4 else (7 - weekday)
         else:
             days_until = 0
         
-        next_open = (now + timedelta(days=days_until)).replace(hour=9, minute=30, second=0)
+        next_open = (now + timedelta(days=days_until)).replace(
+            hour=9, minute=30, second=0, microsecond=0
+        )
+        
         return {
             "status": "FERMÉE",
             "message": f"Prochaine séance: {next_open.strftime('%A %d %B à %H:%M')}",
