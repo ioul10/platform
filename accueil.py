@@ -340,23 +340,37 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# ─── Clock & Status (Heure Casa GMT+1) ───
-tz_casa = ZoneInfo("Africa/Casablanca")
-now = datetime.now(tz_casa)
+# ─── Clock & Status (Dynamique GMT+1 Casablanca) ───
 market = get_market_status()
 status_class = "status-open" if market["status"] == "OUVERTE" else "status-closed"
 dot_class = "pulse-green" if market["status"] == "OUVERTE" else "pulse-red"
 
 st.markdown(f"""
-<div class="mat-clock">{now.strftime("%H:%M:%S")}</div>
-<div class="mat-date">{now.strftime("%A %d %B %Y").capitalize()} — Heure locale</div>
-<div class="status-badge {status_class}">
-    <div class="pulse-dot {dot_class}"></div>
-    SÉANCE {market["status"]}
+<div style="text-align:center;">
+    <div id="casa-clock" class="mat-clock">--:--:--</div>
+    <div id="casa-date" class="mat-date">-- -- ----</div>
+    <div class="status-badge {status_class}">
+        <div class="pulse-dot {dot_class}"></div>
+        SÉANCE {market["status"]}
+    </div>
+    <p style="text-align:center; color:#6B7280; font-family:'DM Sans',sans-serif; margin-top:0.5rem;">
+        {market["message"]}
+    </p>
 </div>
-<p style="text-align:center; color:#6B7280; font-family:'DM Sans',sans-serif; margin-top:0.5rem;">
-    {market["message"]}
-</p>
+
+<script>
+function updateCasaClock() {{
+    const optsTime = {{ timeZone: 'Africa/Casablanca', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }};
+    const optsDate = {{ timeZone: 'Africa/Casablanca', weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' }};
+    const now = new Date();
+    const timeStr = new Intl.DateTimeFormat('fr-FR', optsTime).format(now);
+    const dateStr = new Intl.DateTimeFormat('fr-FR', optsDate).format(now);
+    document.getElementById('casa-clock').innerText = timeStr;
+    document.getElementById('casa-date').innerText = dateStr.charAt(0).toUpperCase() + dateStr.slice(1);
+}}
+setInterval(updateCasaClock, 1000);
+updateCasaClock();
+</script>
 """, unsafe_allow_html=True)
 # ─── Key Metrics ───
 masi_data = scrape_masi_index()
