@@ -95,19 +95,19 @@ def _parse_bourse_overview(soup):
 
 
 def _get_masi_fallback():
-    """Return the latest known MASI data (from today's first session)."""
-    # Data from the actual first trading day - April 6, 2026
+    """Return the latest known MASI data (from April 6, 2026 closing)."""
+    # Real data from BourseNews - première séance du marché à terme
     return {
         "masi": 17525.32,
         "masi_var": -0.06,
         "masi_open": 17545.07,
         "masi_high": 17589.41,
         "masi_low": 17424.69,
-        "masi20": 1316.68,
-        "masi20_var": -0.77,
-        "masi20_open": 1326.50,
-        "masi20_high": 1327.80,
-        "masi20_low": 1309.90,
+        "masi20": 1311.11,
+        "masi20_var": -0.42,
+        "masi20_open": 1316.68,
+        "masi20_high": 1320.00,
+        "masi20_low": 1309.00,
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
 
@@ -164,68 +164,71 @@ def _parse_futures_page(soup):
 
 
 def _get_futures_fallback():
-    """Return first-day trading data for the 4 futures contracts."""
-    # Real data from April 6, 2026 first session
+    """Return first-day trading data for the 4 futures contracts.
+    Source: BourseNews - Bilan de la première séance du marché à terme (6 avril 2026)
+    Total: 16,97 MMAD — 1 295 contrats
+    """
     now = datetime.now()
+    # Cours de référence (prix d'ouverture / première cotation du matin)
+    ref_jun = 1316.53   # cours de référence Juin 26
+    ref_sep = 1316.63   # cours de référence Sep 26
+    ref_dec = 1317.20   # cours de référence Dec 26 
+    ref_mar = 1318.03   # cours de référence Mar 27
     return {
         "FUT-MASI20-JUN26": {
             "label": "Juin 2026",
             "echeance": "2026-06-19",
-            "cours": 1310.80,
-            "variation": -0.49,
-            "ouverture": 1311.30,
+            "cours": 1309.70,
+            "variation": -0.52,
+            "ouverture": 1308.70,
             "plus_haut": 1318.00,
-            "plus_bas": 1309.90,
-            "cloture_veille": 1317.20,
-            "volume_mad": 4722230.00,
-            "volume_titres": 360,
-            "nb_contrats": 360,
-            "prix_initial": 1308.70,
+            "plus_bas": 1305.00,
+            "cloture_veille": ref_jun,
+            "volume_mad": 4420000.00,
+            "volume_titres": 337,
+            "nb_contrats": 337,
             "timestamp": now.strftime("%Y-%m-%d %H:%M:%S"),
         },
         "FUT-MASI20-SEP26": {
             "label": "Septembre 2026",
             "echeance": "2026-09-18",
-            "cours": 1305.40,
-            "variation": -0.19,
-            "ouverture": 1303.50,
+            "cours": 1299.50,
+            "variation": -1.30,
+            "ouverture": 1302.90,
             "plus_haut": 1312.00,
-            "plus_bas": 1300.20,
-            "cloture_veille": 1307.90,
-            "volume_mad": 1850000.00,
-            "volume_titres": 142,
-            "nb_contrats": 142,
-            "prix_initial": 1302.90,
+            "plus_bas": 1295.00,
+            "cloture_veille": ref_sep,
+            "volume_mad": 4170000.00,
+            "volume_titres": 321,
+            "nb_contrats": 321,
             "timestamp": now.strftime("%Y-%m-%d %H:%M:%S"),
         },
         "FUT-MASI20-DEC26": {
             "label": "Décembre 2026",
             "echeance": "2026-12-18",
-            "cours": 1315.60,
-            "variation": 0.33,
-            "ouverture": 1312.00,
+            "cours": 1310.80,
+            "variation": -0.49,
+            "ouverture": 1311.30,
             "plus_haut": 1320.50,
-            "plus_bas": 1310.00,
-            "cloture_veille": 1311.30,
-            "volume_mad": 2340000.00,
-            "volume_titres": 178,
-            "nb_contrats": 178,
-            "prix_initial": 1311.30,
+            "plus_bas": 1305.00,
+            "cloture_veille": ref_dec,
+            "volume_mad": 4720000.00,
+            "volume_titres": 360,
+            "nb_contrats": 360,
             "timestamp": now.strftime("%Y-%m-%d %H:%M:%S"),
         },
         "FUT-MASI20-MAR27": {
             "label": "Mars 2027",
             "echeance": "2027-03-19",
-            "cours": 1322.10,
-            "variation": 0.11,
-            "ouverture": 1320.00,
+            "cours": 1322.00,
+            "variation": 0.30,
+            "ouverture": 1320.70,
             "plus_haut": 1325.00,
-            "plus_bas": 1318.50,
-            "cloture_veille": 1320.70,
-            "volume_mad": 980000.00,
-            "volume_titres": 0,
-            "nb_contrats": 0,
-            "prix_initial": 1320.70,
+            "plus_bas": 1318.00,
+            "cloture_veille": ref_mar,
+            "volume_mad": 3660000.00,
+            "volume_titres": 277,
+            "nb_contrats": 277,
             "timestamp": now.strftime("%Y-%m-%d %H:%M:%S"),
         },
     }
@@ -336,17 +339,17 @@ def load_history():
         except (json.JSONDecodeError, IOError):
             pass
 
-    # Generate initial history (launch day)
+    # Generate initial history (launch day) — real data from BourseNews
     now = datetime.now()
     history = [
         {
             "date": "2026-04-06",
             "timestamp": "2026-04-06 15:30:00",
             "contracts": {
-                "FUT-MASI20-JUN26": {"cours": 1310.80, "volume_mad": 4722230, "nb_contrats": 360, "variation": -0.49, "ouverture": 1311.30, "plus_haut": 1318.00, "plus_bas": 1309.90},
-                "FUT-MASI20-SEP26": {"cours": 1305.40, "volume_mad": 1850000, "nb_contrats": 142, "variation": -0.19, "ouverture": 1303.50, "plus_haut": 1312.00, "plus_bas": 1300.20},
-                "FUT-MASI20-DEC26": {"cours": 1315.60, "volume_mad": 2340000, "nb_contrats": 178, "variation": 0.33, "ouverture": 1312.00, "plus_haut": 1320.50, "plus_bas": 1310.00},
-                "FUT-MASI20-MAR27": {"cours": 1322.10, "volume_mad": 980000, "nb_contrats": 0, "variation": 0.11, "ouverture": 1320.00, "plus_haut": 1325.00, "plus_bas": 1318.50},
+                "FUT-MASI20-JUN26": {"cours": 1309.70, "volume_mad": 4420000, "nb_contrats": 337, "variation": -0.52, "ouverture": 1308.70, "plus_haut": 1318.00, "plus_bas": 1305.00},
+                "FUT-MASI20-SEP26": {"cours": 1299.50, "volume_mad": 4170000, "nb_contrats": 321, "variation": -1.30, "ouverture": 1302.90, "plus_haut": 1312.00, "plus_bas": 1295.00},
+                "FUT-MASI20-DEC26": {"cours": 1310.80, "volume_mad": 4720000, "nb_contrats": 360, "variation": -0.49, "ouverture": 1311.30, "plus_haut": 1320.50, "plus_bas": 1305.00},
+                "FUT-MASI20-MAR27": {"cours": 1322.00, "volume_mad": 3660000, "nb_contrats": 277, "variation": 0.30, "ouverture": 1320.70, "plus_haut": 1325.00, "plus_bas": 1318.00},
             },
         }
     ]
