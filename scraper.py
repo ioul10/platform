@@ -12,8 +12,7 @@ from datetime import datetime, timedelta
 import random
 import time
 
-DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
-os.makedirs(DATA_DIR, exist_ok=True)
+DATA_DIR = os.path.join(os.path.dirname(__file__), "data")  # ✅ __file__ avec underscoresos.makedirs(DATA_DIR, exist_ok=True)
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
