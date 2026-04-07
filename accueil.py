@@ -340,50 +340,46 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# ─── Clock & Status (Dynamique GMT+1 Casablanca) ───
-try:
-    market = get_market_status()
-    status_txt = market.get("status", "INCONNUE")
-    msg_txt = market.get("message", "")
-except Exception:
-    status_txt = "FERMÉE"
-    msg_txt = "Erreur de synchronisation horaire"
+# ─── Clock & Status Dynamique (GMT+1 Casablanca) ───
+casablanca_tz = zoneinfo.ZoneInfo("Africa/Casablanca")
+now = datetime.now(casablanca_tz)
 
-status_class = "status-open" if status_txt == "OUVERTE" else "status-closed"
-dot_class = "pulse-green" if status_txt == "OUVERTE" else "pulse-red"
+market = get_market_status()
 
+status_class = "status-open" if market["status"] == "OUVERTE" else "status-closed"
+dot_class = "pulse-green" if market["status"] == "OUVERTE" else "pulse-red"
+
+# Horloge dynamique avec JavaScript
 st.markdown(f"""
+<div class="mat-clock" id="live-clock">{now.strftime("%H:%M:%S")}</div>
+<div class="mat-date">{now.strftime("%A %d %B %Y").capitalize()}</div>
+
 <div style="text-align:center;">
-    <div id="casa-clock" class="mat-clock">--:--:--</div>
-    <div id="casa-date" class="mat-date">-- -- ----</div>
     <div class="status-badge {status_class}">
-        <div class="pulse-dot {dot_class}"></div>
-        SÉANCE {status_txt}
+        <span class="pulse-dot {dot_class}"></span>
+        SÉANCE {market["status"]}
     </div>
-    <p style="text-align:center; color:#6B7280; font-family:'DM Sans',sans-serif; margin-top:0.5rem;">
-        {msg_txt}
-    </p>
 </div>
+<p style="text-align:center; color:#6B7280; font-family:'DM Sans',sans-serif; font-size:0.85rem; margin-top:0.8rem;">
+    {market["message"]}
+</p>
 
 <script>
-(function() {{
     function updateClock() {{
-        const optsTime = {{ timeZone: 'Africa/Casablanca', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }};
-        const optsDate = {{ timeZone: 'Africa/Casablanca', weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' }};
         const now = new Date();
-        const timeStr = new Intl.DateTimeFormat('fr-FR', optsTime).format(now);
-        const dateStr = new Intl.DateTimeFormat('fr-FR', optsDate).format(now);
-        const clockEl = document.getElementById('casa-clock');
-        const dateEl = document.getElementById('casa-date');
-        if(clockEl) clockEl.textContent = timeStr;
-        if(dateEl) dateEl.textContent = dateStr.charAt(0).toUpperCase() + dateStr.slice(1);
+        // Ajustement pour GMT+1 (Casablanca)
+        const casablancaTime = new Date(now.getTime() + (now.getTimezoneOffset() * 60000) + 3600000);
+        const hours = String(casablancaTime.getHours()).padStart(2, '0');
+        const minutes = String(casablancaTime.getMinutes()).padStart(2, '0');
+        const seconds = String(casablancaTime.getSeconds()).padStart(2, '0');
+        
+        document.getElementById("live-clock").textContent = `${{hours}}:${{minutes}}:${{seconds}}`;
     }}
-    updateClock();
+    
     setInterval(updateClock, 1000);
-}})();
+    updateClock();  // Mise à jour immédiate
 </script>
 """, unsafe_allow_html=True)
-
 # ─── Key Metrics ───
 masi_data = scrape_masi_index()
 masi_change_class = "metric-change-up" if masi_data.get("masi_var", 0) >= 0 else "metric-change-down"
