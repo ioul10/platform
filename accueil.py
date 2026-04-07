@@ -341,6 +341,9 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ─── Clock & Status Dynamique (GMT+1 Casablanca) ───
+import zoneinfo
+from datetime import datetime
+
 casablanca_tz = zoneinfo.ZoneInfo("Africa/Casablanca")
 now = datetime.now(casablanca_tz)
 
@@ -349,7 +352,6 @@ market = get_market_status()
 status_class = "status-open" if market["status"] == "OUVERTE" else "status-closed"
 dot_class = "pulse-green" if market["status"] == "OUVERTE" else "pulse-red"
 
-# Horloge dynamique avec JavaScript
 st.markdown(f"""
 <div class="mat-clock" id="live-clock">{now.strftime("%H:%M:%S")}</div>
 <div class="mat-date">{now.strftime("%A %d %B %Y").capitalize()}</div>
@@ -367,17 +369,14 @@ st.markdown(f"""
 <script>
     function updateClock() {{
         const now = new Date();
-        // Ajustement pour GMT+1 (Casablanca)
         const casablancaTime = new Date(now.getTime() + (now.getTimezoneOffset() * 60000) + 3600000);
         const hours = String(casablancaTime.getHours()).padStart(2, '0');
         const minutes = String(casablancaTime.getMinutes()).padStart(2, '0');
         const seconds = String(casablancaTime.getSeconds()).padStart(2, '0');
-        
         document.getElementById("live-clock").textContent = `${{hours}}:${{minutes}}:${{seconds}}`;
     }}
-    
     setInterval(updateClock, 1000);
-    updateClock();  // Mise à jour immédiate
+    updateClock();
 </script>
 """, unsafe_allow_html=True)
 # ─── Key Metrics ───
