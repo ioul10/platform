@@ -352,35 +352,99 @@ market = get_market_status()
 status_class = "status-open" if market["status"] == "OUVERTE" else "status-closed"
 dot_class = "pulse-green" if market["status"] == "OUVERTE" else "pulse-red"
 
-clock_html = f"""
-<div style="text-align: center; padding: 1rem 0 2rem;">
-    <div class="mat-clock" id="live-clock">{now.strftime("%H:%M:%S")}</div>
-    <div class="mat-date">{now.strftime("%A %d %B %Y").capitalize()}</div>
+clock_html = """
+<div style="text-align: center; padding: 2rem 0 2.5rem; 
+            background: linear-gradient(180deg, #060A13, #0A0E17); 
+            border-radius: 20px; margin: 1rem 0;">
 
-    <div style="text-align:center;">
-        <div class="status-badge {status_class}">
-            <span class="pulse-dot {dot_class}"></span>
-            SÉANCE {market["status"]}
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@700&family=DM+Sans:wght@400;500&display=swap');
+        
+        .mat-clock {
+            font-family: 'Space Mono', monospace !important;
+            font-size: 3.8rem !important;
+            font-weight: 700 !important;
+            color: #E5E7EB;
+            letter-spacing: 6px;
+            text-shadow: 0 0 20px rgba(212, 168, 67, 0.3);
+            margin-bottom: 0.4rem;
+        }
+        
+        .mat-date {
+            font-family: 'DM Sans', sans-serif;
+            color: #6B7280;
+            font-size: 1.1rem;
+            letter-spacing: 2px;
+            text-transform: capitalize;
+            margin-bottom: 1.8rem;
+        }
+        
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 12px;
+            background: rgba(16, 185, 129, 0.15);
+            border: 2px solid rgba(16, 185, 129, 0.4);
+            color: #10B981;
+            font-family: 'Space Mono', monospace;
+            font-size: 1.1rem;
+            font-weight: 700;
+            letter-spacing: 2px;
+            padding: 14px 38px;
+            border-radius: 50px;
+            text-transform: uppercase;
+            box-shadow: 0 0 25px rgba(16, 185, 129, 0.25);
+        }
+        
+        .pulse-dot {
+            width: 12px;
+            height: 12px;
+            background: #10B981;
+            border-radius: 50%;
+            box-shadow: 0 0 12px #10B981;
+            animation: pulse 2s ease-in-out infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.4; transform: scale(0.7); }
+        }
+        
+        .message {
+            color: #9CA3AF;
+            font-family: 'DM Sans', sans-serif;
+            font-size: 0.95rem;
+            margin-top: 1.2rem;
+            letter-spacing: 1px;
+        }
+    </style>
+
+    <div class="mat-clock" id="live-clock">12:35:50</div>
+    <div class="mat-date">""" + now.strftime("%A %d %B %Y").capitalize() + """</div>
+
+    <div>
+        <div class="status-badge">
+            <span class="pulse-dot"></span>
+            SÉANCE """ + market["status"] + """
         </div>
     </div>
-    <p style="text-align:center; color:#6B7280; font-family:'DM Sans',sans-serif; font-size:0.85rem; margin-top:0.8rem;">
-        {market["message"]}
-    </p>
+    
+    <div class="message">
+        """ + market["message"] + """
+    </div>
 </div>
 
 <script>
-    function updateClock() {{
+    function updateClock() {
         const now = new Date();
-        // Force GMT+1 (Africa/Casablanca)
         const casablancaTime = new Date(now.getTime() + (now.getTimezoneOffset() * 60000) + 3600000);
         const hours = String(casablancaTime.getHours()).padStart(2, '0');
         const minutes = String(casablancaTime.getMinutes()).padStart(2, '0');
         const seconds = String(casablancaTime.getSeconds()).padStart(2, '0');
         document.getElementById("live-clock").textContent = hours + ":" + minutes + ":" + seconds;
-    }}
-    
+    }
     setInterval(updateClock, 1000);
-    updateClock();  // Mise à jour immédiate
+    updateClock();
 </script>
 """
 
