@@ -6,6 +6,7 @@ V1 — Plateforme de suivi des Futures MASI 20
 import streamlit as st
 from datetime import datetime
 import locale
+from zoneinfo import ZoneInfo
 
 # ─── Page Config ───
 st.set_page_config(
@@ -339,27 +340,24 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# ─── Clock & Status ───
-now = datetime.now()
+# ─── Clock & Status (Heure Casa GMT+1) ───
+tz_casa = ZoneInfo("Africa/Casablanca")
+now = datetime.now(tz_casa)
 market = get_market_status()
-
 status_class = "status-open" if market["status"] == "OUVERTE" else "status-closed"
 dot_class = "pulse-green" if market["status"] == "OUVERTE" else "pulse-red"
 
 st.markdown(f"""
 <div class="mat-clock">{now.strftime("%H:%M:%S")}</div>
-<div class="mat-date">{now.strftime("%A %d %B %Y").capitalize()}</div>
-<div style="text-align:center;">
-    <div class="status-badge {status_class}">
-        <span class="pulse-dot {dot_class}"></span>
-        SÉANCE {market["status"]}
-    </div>
+<div class="mat-date">{now.strftime("%A %d %B %Y").capitalize()} — Heure locale</div>
+<div class="status-badge {status_class}">
+    <div class="pulse-dot {dot_class}"></div>
+    SÉANCE {market["status"]}
 </div>
-<p style="text-align:center; color:#6B7280; font-family:'DM Sans',sans-serif; font-size:0.85rem; margin-top:0.8rem;">
+<p style="text-align:center; color:#6B7280; font-family:'DM Sans',sans-serif; margin-top:0.5rem;">
     {market["message"]}
 </p>
 """, unsafe_allow_html=True)
-
 # ─── Key Metrics ───
 masi_data = scrape_masi_index()
 masi_change_class = "metric-change-up" if masi_data.get("masi_var", 0) >= 0 else "metric-change-down"
