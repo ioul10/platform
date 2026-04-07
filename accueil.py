@@ -341,9 +341,16 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ─── Clock & Status (Dynamique GMT+1 Casablanca) ───
-market = get_market_status()
-status_class = "status-open" if market["status"] == "OUVERTE" else "status-closed"
-dot_class = "pulse-green" if market["status"] == "OUVERTE" else "pulse-red"
+try:
+    market = get_market_status()
+    status_txt = market.get("status", "INCONNUE")
+    msg_txt = market.get("message", "")
+except Exception:
+    status_txt = "FERMÉE"
+    msg_txt = "Erreur de synchronisation horaire"
+
+status_class = "status-open" if status_txt == "OUVERTE" else "status-closed"
+dot_class = "pulse-green" if status_txt == "OUVERTE" else "pulse-red"
 
 st.markdown(f"""
 <div style="text-align:center;">
@@ -351,27 +358,32 @@ st.markdown(f"""
     <div id="casa-date" class="mat-date">-- -- ----</div>
     <div class="status-badge {status_class}">
         <div class="pulse-dot {dot_class}"></div>
-        SÉANCE {market["status"]}
+        SÉANCE {status_txt}
     </div>
     <p style="text-align:center; color:#6B7280; font-family:'DM Sans',sans-serif; margin-top:0.5rem;">
-        {market["message"]}
+        {msg_txt}
     </p>
 </div>
 
 <script>
-function updateCasaClock() {{
-    const optsTime = {{ timeZone: 'Africa/Casablanca', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }};
-    const optsDate = {{ timeZone: 'Africa/Casablanca', weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' }};
-    const now = new Date();
-    const timeStr = new Intl.DateTimeFormat('fr-FR', optsTime).format(now);
-    const dateStr = new Intl.DateTimeFormat('fr-FR', optsDate).format(now);
-    document.getElementById('casa-clock').innerText = timeStr;
-    document.getElementById('casa-date').innerText = dateStr.charAt(0).toUpperCase() + dateStr.slice(1);
-}}
-setInterval(updateCasaClock, 1000);
-updateCasaClock();
+(function() {{
+    function updateClock() {{
+        const optsTime = {{ timeZone: 'Africa/Casablanca', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }};
+        const optsDate = {{ timeZone: 'Africa/Casablanca', weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' }};
+        const now = new Date();
+        const timeStr = new Intl.DateTimeFormat('fr-FR', optsTime).format(now);
+        const dateStr = new Intl.DateTimeFormat('fr-FR', optsDate).format(now);
+        const clockEl = document.getElementById('casa-clock');
+        const dateEl = document.getElementById('casa-date');
+        if(clockEl) clockEl.textContent = timeStr;
+        if(dateEl) dateEl.textContent = dateStr.charAt(0).toUpperCase() + dateStr.slice(1);
+    }}
+    updateClock();
+    setInterval(updateClock, 1000);
+}})();
 </script>
 """, unsafe_allow_html=True)
+
 # ─── Key Metrics ───
 masi_data = scrape_masi_index()
 masi_change_class = "metric-change-up" if masi_data.get("masi_var", 0) >= 0 else "metric-change-down"
