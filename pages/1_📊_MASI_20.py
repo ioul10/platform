@@ -213,14 +213,13 @@ with col2:
     </div>
     """, unsafe_allow_html=True)
 
-# ─── Chart Intraday MASI 20 (Version Réaliste) ───
+# ─── Chart Intraday MASI 20 (Dynamique) ───
 st.markdown('<h3 class="section-title">📈 Évolution intraday — MASI 20</h3>', unsafe_allow_html=True)
 
-chart_data = generate_masi20_chart_data()   # ← Appel de la nouvelle fonction
+chart_data = generate_masi20_chart_data()
 
 fig = go.Figure()
 
-# Area chart réaliste
 fig.add_trace(go.Scatter(
     x=chart_data["times"],
     y=chart_data["values"],
@@ -231,56 +230,25 @@ fig.add_trace(go.Scatter(
     hovertemplate="<b>%{x}</b><br>MASI 20: %{y:,.2f} pts<extra></extra>",
 ))
 
-# Ligne d'ouverture
-fig.add_hline(
-    y=chart_data["open"],
-    line_dash="dot",
-    line_color="rgba(107, 114, 128, 0.5)",
-    annotation_text=f"Ouverture: {chart_data['open']:,.2f}",
-    annotation_position="top right",
-    annotation_font=dict(color="#6B7280", size=11, family="Space Mono"),
-)
+# Ligne ouverture
+fig.add_hline(y=chart_data["open"], line_dash="dot", line_color="rgba(107,114,128,0.5)",
+              annotation_text=f"Ouverture {chart_data['open']:,.2f}", annotation_position="top right")
 
-# Ligne de la valeur actuelle (facultatif mais très pro)
-fig.add_hline(
-    y=chart_data["current"],
-    line_dash="dash",
-    line_color="#10B981",
-    annotation_text=f"Aujourd'hui: {chart_data['current']:,.2f}",
-    annotation_position="bottom right",
-    annotation_font=dict(color="#10B981", size=11, family="Space Mono"),
-)
+# Ligne valeur actuelle (seulement si marché ouvert)
+if chart_data["is_market_open"]:
+    fig.add_hline(y=chart_data["current"], line_dash="dash", line_color="#10B981",
+                  annotation_text=f"Maintenant {chart_data['current']:,.2f}", annotation_position="bottom right")
 
 fig.update_layout(
     height=420,
     margin=dict(l=0, r=0, t=30, b=0),
     paper_bgcolor="rgba(0,0,0,0)",
     plot_bgcolor="rgba(0,0,0,0)",
-    xaxis=dict(
-        showgrid=False,
-        color="#4B5563",
-        tickfont=dict(family="Space Mono", size=10, color="#4B5563"),
-        dtick=12,
-    ),
-    yaxis=dict(
-        showgrid=True,
-        gridcolor="rgba(212, 168, 67, 0.06)",
-        color="#4B5563",
-        tickfont=dict(family="Space Mono", size=10, color="#4B5563"),
-        tickformat=",",
-        range=[chart_data["low"] - 3, chart_data["high"] + 3],   # zoom automatique
-    ),
-    hoverlabel=dict(
-        bgcolor="#111827",
-        bordercolor="#D4A843",
-        font=dict(family="DM Sans", color="#E5E7EB"),
-    ),
+    xaxis=dict(showgrid=False, color="#4B5563", tickfont=dict(family="Space Mono", size=10)),
+    yaxis=dict(showgrid=True, gridcolor="rgba(212,168,67,0.06)", tickformat=","),
 )
 
 st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
-
-# Petite info en bas
-st.caption(f"✅ Données en temps réel • Ouverture : {chart_data['open']:,.2f} | Haut : {chart_data['high']:,.2f} | Bas : {chart_data['low']:,.2f}")
 # ─── Top Movers ───
 st.markdown('<h3 class="section-title">🔥 Top 5 Hausses & Baisses</h3>', unsafe_allow_html=True)
 
