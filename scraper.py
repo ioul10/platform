@@ -623,3 +623,39 @@ def generate_masi20_chart_data():
         "current": round(current_price, 2),
         "is_market_open": is_market_open()
     }
+
+def get_daily_report():
+    """
+    Retourne le rapport de la dernière séance clôturée
+    (volume total, contrats, tableau résumé)
+    """
+    history = load_history()
+    if not history:
+        return None, 0, 0, pd.DataFrame()
+
+    # On prend la dernière séance enregistrée
+    latest = history[-1]
+    contracts = latest.get("contracts", {})
+
+    total_volume = sum(v.get("volume_mad", 0) for v in contracts.values())
+    total_contrats = sum(v.get("nb_contrats", 0) for v in contracts.values())
+
+    # Tableau résumé
+    rows = []
+    for key, data in contracts.items():
+        label = data.get("label", key.split("-")[-1])
+        rows.append({
+            "Contrat": f"Future MASI 20 — {label}",
+            "Cours": data.get("cours", 0),
+            "Variation (%)": data.get("variation", 0),
+            "Ouverture": data.get("ouverture", "-"),
+            "Plus Haut": data.get("plus_haut", "-"),
+            "Plus Bas": data.get("plus_bas", "-"),
+            "Volume (MAD)": data.get("volume_mad", 0),
+            "Contrats": data.get("nb_contrats", 0),
+            "Échéance": data.get("echeance", "-"),
+        })
+
+    df_summary = pd.DataFrame(rows)
+
+    return latest["date"], total_volume, total_contrats, df_summary
