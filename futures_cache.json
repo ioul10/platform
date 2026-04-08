@@ -1,0 +1,62 @@
+{
+  "date": "2026-04-08",
+  "timestamp": "2026-04-08 10:50:05",
+  "contracts": {
+    "FUT-MASI20-JUN26": {
+      "label": "Juin 2026",
+      "echeance": "2026-06-19",
+      "cours": 1309.7,
+      "variation": -0.52,
+      "ouverture": 1308.7,
+      "plus_haut": 1318.0,
+      "plus_bas": 1305.0,
+      "cloture_veille": 1316.53,
+      "volume_mad": 4420000.0,
+      "nb_contrats": 337,
+      "timestamp": "2026-04-08 10:50:05",
+      "source": "donnees_officielles_seance1"
+    },
+    "FUT-MASI20-SEP26": {
+      "label": "Septembre 2026",
+      "echeance": "2026-09-18",
+      "cours": 1299.5,
+      "variation": -1.3,
+      "ouverture": 1302.9,
+      "plus_haut": 1312.0,
+      "plus_bas": 1295.0,
+      "cloture_veille": 1316.63,
+      "volume_mad": 4170000.0,
+      "nb_contrats": 321,
+      "timestamp": "2026-04-08 10:50:05",
+      "source": "donnees_officielles_seance1"
+    },
+    "FUT-MASI20-DEC26": {
+      "label": "Décembre 2026",
+      "echeance": "2026-12-18",
+      "cours": 1310.8,
+      "variation": -0.49,
+      "ouverture": 1311.3,
+      "plus_haut": 1320.5,
+      "plus_bas": 1305.0,
+      "cloture_veille": 1317.2,
+      "volume_mad": 4720000.0,
+      "nb_contrats": 360,
+      "timestamp": "2026-04-08 10:50:05",
+      "source": "donnees_officielles_seance1"
+    },
+    "FUT-MASI20-MAR27": {
+      "label": "Mars 2027",
+      "echeance": "2027-03-19",
+      "cours": 1322.0,
+      "variation": 0.3,
+      "ouverture": 1320.7,
+      "plus_haut": 1325.0,
+      "plus_bas": 1318.0,
+      "cloture_veille": 1318.03,
+      "volume_mad": 3660000.0,
+      "nb_contrats": 277,
+      "timestamp": "2026-04-08 10:50:05",
+      "source": "donnees_officielles_seance1"
+    }
+  }
+}
