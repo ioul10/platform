@@ -646,73 +646,7 @@ st.dataframe(
         "Échéance": st.column_config.TextColumn("Échéance", width=100),
     },
 )
-# ─── RAPPORT DE CLÔTURE / SÉANCE ───
-st.markdown('<h3 class="section-title">📄 Rapport de Clôture — Dernière Séance</h3>', unsafe_allow_html=True)
 
-report_date, total_mad, total_ctr, df_report = get_daily_report()
-
-if report_date:
-    st.markdown(f"""
-    <div style="background:rgba(17,24,39,0.8); border:1px solid rgba(212,168,67,0.25); 
-                border-radius:16px; padding:1.5rem; margin-bottom:1.5rem;">
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-            <div>
-                <span style="color:#D4A843; font-family:'Space Mono'; font-size:1.1rem;">Séance du</span><br>
-                <span style="color:#E5E7EB; font-size:1.8rem; font-weight:700;">{report_date}</span>
-            </div>
-            <div style="text-align:right;">
-                <div style="font-family:'Space Mono'; color:#10B981; font-size:1.3rem; font-weight:700;">
-                    {total_mad:,.0f} <span style="font-size:0.9rem; color:#6B7280;">MAD</span>
-                </div>
-                <div style="font-size:0.95rem; color:#6B7280;">Volume total</div>
-            </div>
-            <div style="text-align:right;">
-                <div style="font-family:'Space Mono'; color:#E5E7EB; font-size:1.3rem; font-weight:700;">
-                    {total_ctr:,}
-                </div>
-                <div style="font-size:0.95rem; color:#6B7280;">Contrats échangés</div>
-            </div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    st.dataframe(
-        df_report,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "Contrat": st.column_config.TextColumn("Contrat", width=220),
-            "Cours": st.column_config.NumberColumn("Cours", format="%.2f"),
-            "Variation (%)": st.column_config.NumberColumn("Var %", format="%+.2f"),
-            "Ouverture": st.column_config.NumberColumn("Ouverture", format="%.2f"),
-            "Plus Haut": st.column_config.NumberColumn("+ Haut", format="%.2f"),
-            "Plus Bas": st.column_config.NumberColumn("+ Bas", format="%.2f"),
-            "Volume (MAD)": st.column_config.NumberColumn("Volume", format="%,.0f"),
-            "Contrats": st.column_config.NumberColumn("Contrats", format="%d"),
-        }
-    )
-
-    # Téléchargement Excel + CSV
-    csv = df_report.to_csv(index=False).encode("utf-8")
-    excel = df_report.to_excel(index=False).encode("utf-8") if hasattr(df_report, 'to_excel') else csv
-
-    col1, col2 = st.columns(2)
-    with col1:
-        st.download_button(
-            label="📥 Télécharger en CSV",
-            data=csv,
-            file_name=f"rapport_futures_{report_date}.csv",
-            mime="text/csv"
-        )
-    with col2:
-        st.download_button(
-            label="📊 Télécharger en Excel",
-            data=excel,
-            file_name=f"rapport_futures_{report_date}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-else:
-    st.info("Aucun rapport de clôture disponible pour le moment.")
 
 # ─── Footer ───
 st.markdown("""
