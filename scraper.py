@@ -1,408 +1,538 @@
 """
 scraper.py — Scraper pour le Marché à Terme de la Bourse de Casablanca
-Scrape les données MASI 20, Futures, et historiques.
+Source principale : https://futures.casablanca-bourse.com/
+Timezone : Africa/Casablanca (GMT+1)
+Cache quotidien : une seule requête réseau par jour
 """
 
 import requests
 from bs4 import BeautifulSoup
-import pandas as pd
 import json
 import os
+import re
 from datetime import datetime, timedelta
-import random
-import time
-import zoneinfo
+
+# ─── Timezone : Africa/Casablanca (GMT+1) ───────────────────────────────────
+try:
+    from zoneinfo import ZoneInfo
+    _TZ = ZoneInfo("Africa/Casablanca")
+    def now_casa():
+        from datetime import timezone
+        return datetime.now(timezone.utc).astimezone(_TZ)
+except Exception:
+    try:
+        import pytz
+        _TZ = pytz.timezone("Africa/Casablanca")
+        def now_casa():
+            return datetime.now(_TZ)
+    except Exception:
+        from datetime import timezone, timedelta as _td
+        _TZ = timezone(_td(hours=1))
+        def now_casa():
+            return datetime.now(_TZ)
 
 
-DATA_DIR = os.path.join(os.path.dirname(__file__), "data")  # ✅ __file__ avec underscoresos.makedirs(DATA_DIR, exist_ok=True)
+DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
+os.makedirs(DATA_DIR, exist_ok=True)
+
+CACHE_FILE   = os.path.join(DATA_DIR, "futures_cache.json")
+HISTORY_FILE = os.path.join(DATA_DIR, "futures_history.json")
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept-Language": "fr-FR,fr;q=0.9",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 }
 
-CONTRACTS = {
-    "FUT-MASI20-JUN26": {"label": "Juin 2026", "echeance": "2026-06-19", "code": "JUN26"},
-    "FUT-MASI20-SEP26": {"label": "Septembre 2026", "echeance": "2026-09-18", "code": "SEP26"},
-    "FUT-MASI20-DEC26": {"label": "Décembre 2026", "echeance": "2026-12-18", "code": "DEC26"},
-    "FUT-MASI20-MAR27": {"label": "Mars 2027", "echeance": "2027-03-19", "code": "MAR27"},
+CONTRACTS_META = {
+    "FUT-MASI20-JUN26": {
+        "label": "Juin 2026", "echeance": "2026-06-19",
+        "keywords": ["juin", "jun", "jun26", "juin26", "jun 26", "juin 2026"],
+        "cours_reference": 1316.53,
+    },
+    "FUT-MASI20-SEP26": {
+        "label": "Septembre 2026", "echeance": "2026-09-18",
+        "keywords": ["sept", "sep", "sep26", "sept26", "sep 26", "sept 2026", "septembre"],
+        "cours_reference": 1316.63,
+    },
+    "FUT-MASI20-DEC26": {
+        "label": "Décembre 2026", "echeance": "2026-12-18",
+        "keywords": ["dec", "dec26", "dec 26", "decembre", "dec 2026", "dEc"],
+        "cours_reference": 1317.20,
+    },
+    "FUT-MASI20-MAR27": {
+        "label": "Mars 2027", "echeance": "2027-03-19",
+        "keywords": ["mar", "mars", "mar27", "mars27", "mar 27", "mars 2027"],
+        "cours_reference": 1318.03,
+    },
 }
 
 
-def _get_session():
-    """Create a session with retries."""
-    s = requests.Session()
-    s.headers.update(HEADERS)
-    return s
+# ─── Helpers ─────────────────────────────────────────────────────────────────
 
+def get_now_casa():
+    return now_casa()
 
-def scrape_masi_index():
-    """
-    Scrape MASI and MASI 20 index data from Bourse de Casablanca.
-    Returns dict with index values or fallback data.
-    """
-    try:
-        session = _get_session()
-        # Try casablanca-bourse.com overview
-        url = "https://www.casablanca-bourse.com/fr/live-market/overview"
-        resp = session.get(url, timeout=15)
-        if resp.status_code == 200:
-            soup = BeautifulSoup(resp.text, "lxml")
-            # Parse index values from the page
-            data = _parse_bourse_overview(soup)
-            if data:
-                return data
-    except Exception as e:
-        print(f"[scraper] MASI scrape error: {e}")
+def format_datetime_casa(fmt="%d/%m/%Y %H:%M:%S"):
+    return get_now_casa().strftime(fmt)
 
-    # Fallback: use investing.com or cached data
-    return _get_masi_fallback()
+def _extract_numbers(text):
+    cleaned = text.replace("\xa0", "").replace(" ", "").replace(",", ".")
+    return [float(n) for n in re.findall(r"-?\d+(?:\.\d+)?", cleaned)]
 
-
-def _parse_bourse_overview(soup):
-    """Try to extract MASI data from Bourse de Casablanca overview page."""
-    try:
-        text = soup.get_text()
-        # Look for MASI values in the page
-        # The page typically has index cards with values
-        indices = {}
-        # Try to find structured data
-        cards = soup.find_all("div", class_=lambda c: c and "index" in str(c).lower())
-        if not cards:
-            cards = soup.find_all("div", class_=lambda c: c and "card" in str(c).lower())
-
-        for card in cards:
-            txt = card.get_text()
-            if "MASI" in txt:
-                # Extract numeric values
-                nums = []
-                for word in txt.split():
-                    cleaned = word.replace(",", ".").replace(" ", "").replace("\xa0", "")
-                    try:
-                        nums.append(float(cleaned))
-                    except ValueError:
-                        pass
-                if nums:
-                    if "MASI 20" in txt or "MASI20" in txt:
-                        indices["masi20"] = nums[0]
-                    elif "MASI" in txt:
-                        indices["masi"] = nums[0]
-        if indices:
-            return indices
-    except Exception as e:
-        print(f"[scraper] Parse error: {e}")
+def _match_contract(text):
+    tl = text.lower()
+    for key, meta in CONTRACTS_META.items():
+        if any(kw in tl for kw in meta["keywords"]):
+            return key
     return None
 
 
-def _get_masi_fallback():
-    """Return the latest known MASI data (from April 6, 2026 closing)."""
-    # Real data from BourseNews - première séance du marché à terme
-    return {
-        "masi": 17525.32,
-        "masi_var": -0.06,
-        "masi_open": 17545.07,
-        "masi_high": 17589.41,
-        "masi_low": 17424.69,
-        "masi20": 1311.11,
-        "masi20_var": -0.42,
-        "masi20_open": 1316.68,
-        "masi20_high": 1320.00,
-        "masi20_low": 1309.00,
-        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    }
+# ─── Statut du marché ─────────────────────────────────────────────────────────
+
+def is_market_open():
+    now = get_now_casa()
+    if now.weekday() >= 5:
+        return False
+    total = now.hour * 60 + now.minute
+    return 9 * 60 + 30 <= total <= 15 * 60 + 30
+
+def get_market_status():
+    now = get_now_casa()
+    open_ = is_market_open()
+    if open_:
+        close = now.replace(hour=15, minute=30, second=0, microsecond=0)
+        rem = int((close - now).total_seconds() // 60)
+        return {
+            "status": "OUVERTE",
+            "message": "Séance en cours — Fermeture à 15h30",
+            "remaining": f"{rem // 60}h {rem % 60:02d}m",
+            "timestamp": now.strftime("%d/%m/%Y %H:%M"),
+        }
+    else:
+        wd, h, m = now.weekday(), now.hour, now.minute
+        if wd >= 5:
+            days = 7 - wd
+        elif h > 15 or (h == 15 and m > 30):
+            days = 1 if wd < 4 else (7 - wd)
+        else:
+            days = 0
+        nxt = (now + timedelta(days=days)).replace(hour=9, minute=30, second=0, microsecond=0)
+        jour = ["Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi","Dimanche"][nxt.weekday()]
+        return {
+            "status": "FERMÉE",
+            "message": f"Prochaine séance : {jour} {nxt.strftime('%d/%m à %H:%M')}",
+            "next_open": nxt.strftime("%Y-%m-%d %H:%M"),
+            "timestamp": now.strftime("%d/%m/%Y %H:%M"),
+        }
 
 
-def scrape_futures_data():
-    """Essaie de scraper le site officiel (peu probable à cause du JS/CAPTCHA)"""
+# ─── Cache quotidien ──────────────────────────────────────────────────────────
+
+def _load_cache():
+    if not os.path.exists(CACHE_FILE):
+        return None
     try:
-        session = _get_session()
-        resp = session.get("https://futures.casablanca-bourse.com/", timeout=12)
-        if resp.status_code == 200:
-            soup = BeautifulSoup(resp.text, "lxml")
-            data = _parse_futures_page(soup)
-            if data:
-                _save_history(data)
-                return data
-    except Exception as e:
-        print(f"[scraper] Futures scrape error: {e}")
+        with open(CACHE_FILE, "r", encoding="utf-8") as f:
+            cache = json.load(f)
+        today = get_now_casa().strftime("%Y-%m-%d")
+        if cache.get("date") == today and cache.get("contracts"):
+            return cache["contracts"]
+    except Exception:
+        pass
+    return None
 
-    # Fallback mis à jour avec données réelles du 6 avril 2026
-    return _get_futures_fallback()
+def _save_cache(contracts):
+    now = get_now_casa()
+    try:
+        with open(CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump({
+                "date": now.strftime("%Y-%m-%d"),
+                "timestamp": now.strftime("%Y-%m-%d %H:%M:%S"),
+                "contracts": contracts,
+            }, f, indent=2, ensure_ascii=False)
+    except IOError as e:
+        print(f"[scraper] Cache write error: {e}")
 
 
-def _parse_futures_page(soup):
-    """Parse futures data from the Bourse page."""
+# ─── Parsing HTML ─────────────────────────────────────────────────────────────
+
+def _parse_futures_html(html):
+    """Parse la page futures.casablanca-bourse.com — tables puis blocs div."""
+    soup = BeautifulSoup(html, "lxml")
     contracts = {}
-    try:
-        tables = soup.find_all("table")
-        for table in tables:
-            rows = table.find_all("tr")
-            for row in rows:
-                cells = row.find_all(["td", "th"])
-                text = " ".join(c.get_text(strip=True) for c in cells)
-                for key, info in CONTRACTS.items():
-                    if info["code"].lower() in text.lower() or info["label"].lower() in text.lower():
-                        nums = []
-                        for cell in cells:
-                            val = cell.get_text(strip=True).replace(",", ".").replace(" ", "").replace("\xa0", "")
-                            try:
-                                nums.append(float(val))
-                            except ValueError:
-                                pass
-                        if len(nums) >= 2:
-                            contracts[key] = {
-                                "cours": nums[0],
-                                "variation": nums[1] if len(nums) > 1 else 0,
-                            }
-    except Exception as e:
-        print(f"[scraper] Futures parse error: {e}")
+
+    # Strategie 1 : tableaux
+    for table in soup.find_all("table"):
+        rows = table.find_all("tr")
+        headers = []
+        if rows:
+            headers = [th.get_text(strip=True).lower() for th in rows[0].find_all(["th","td"])]
+        for row in rows[1:]:
+            cells = row.find_all(["td","th"])
+            if len(cells) < 3:
+                continue
+            row_text = " ".join(c.get_text(strip=True) for c in cells)
+            key = _match_contract(row_text)
+            if not key:
+                continue
+
+            cell_vals = []
+            for c in cells:
+                t = c.get_text(strip=True).replace("\xa0","").replace(",",".").replace(" ","")
+                t = re.sub(r"[^\d.\-]", "", t)
+                try:
+                    cell_vals.append(float(t))
+                except ValueError:
+                    cell_vals.append(None)
+
+            col_map = {}
+            for i, h in enumerate(headers):
+                if any(k in h for k in ["cours","dernier","last","prix","price"]):
+                    col_map.setdefault("cours", i)
+                elif any(k in h for k in ["var","change","evol"]):
+                    col_map.setdefault("variation", i)
+                elif any(k in h for k in ["ouv","open"]):
+                    col_map.setdefault("ouverture", i)
+                elif any(k in h for k in ["haut","high","max"]):
+                    col_map.setdefault("plus_haut", i)
+                elif any(k in h for k in ["bas","low","min"]):
+                    col_map.setdefault("plus_bas", i)
+                elif any(k in h for k in ["vol","volume","nom"]):
+                    col_map.setdefault("volume_mad", i)
+                elif any(k in h for k in ["ctr","contrat","nb","qty","qte"]):
+                    col_map.setdefault("nb_contrats", i)
+                elif any(k in h for k in ["veille","ref","prev","clo"]):
+                    col_map.setdefault("cloture_veille", i)
+
+            def gcv(name, fb=None):
+                idx = col_map.get(name, fb)
+                if idx is not None and idx < len(cell_vals) and cell_vals[idx] is not None:
+                    return cell_vals[idx]
+                return None
+
+            nums = _extract_numbers(row_text)
+            meta = CONTRACTS_META[key]
+            cours = gcv("cours", 1) or (nums[0] if nums else None)
+            if cours is None:
+                continue
+            variation = gcv("variation")
+            if variation is None:
+                ref = meta["cours_reference"]
+                variation = round((cours - ref) / ref * 100, 2)
+
+            contracts[key] = {
+                "label": meta["label"],
+                "echeance": meta["echeance"],
+                "cours": cours,
+                "variation": variation,
+                "ouverture": gcv("ouverture"),
+                "plus_haut": gcv("plus_haut"),
+                "plus_bas": gcv("plus_bas"),
+                "cloture_veille": gcv("cloture_veille") or meta["cours_reference"],
+                "volume_mad": gcv("volume_mad"),
+                "nb_contrats": gcv("nb_contrats"),
+                "timestamp": get_now_casa().strftime("%Y-%m-%d %H:%M:%S"),
+                "source": "futures.casablanca-bourse.com",
+            }
+
+    if len(contracts) >= 2:
+        return contracts
+
+    # Strategie 2 : blocs div/section
+    for tag in soup.find_all(["div","section","article","li","p"]):
+        text = tag.get_text(separator=" ", strip=True)
+        key = _match_contract(text)
+        if not key or key in contracts:
+            continue
+        nums = _extract_numbers(text)
+        if len(nums) < 2:
+            continue
+        meta = CONTRACTS_META[key]
+        cours = nums[0]
+        # Cherche la variation (entre -30 et +30)
+        variation = next((n for n in nums[1:] if -30 <= n <= 30), None)
+        if variation is None:
+            ref = meta["cours_reference"]
+            variation = round((cours - ref) / ref * 100, 2)
+        contracts[key] = {
+            "label": meta["label"],
+            "echeance": meta["echeance"],
+            "cours": cours,
+            "variation": variation,
+            "ouverture": nums[2] if len(nums) > 2 else None,
+            "plus_haut": nums[3] if len(nums) > 3 else None,
+            "plus_bas": nums[4] if len(nums) > 4 else None,
+            "cloture_veille": meta["cours_reference"],
+            "volume_mad": None,
+            "nb_contrats": None,
+            "timestamp": get_now_casa().strftime("%Y-%m-%d %H:%M:%S"),
+            "source": "futures.casablanca-bourse.com",
+        }
+
     return contracts if contracts else None
 
 
+def _fetch_from_web():
+    """Tente de scraper futures.casablanca-bourse.com."""
+    urls = [
+        "https://futures.casablanca-bourse.com/",
+        "https://futures.casablanca-bourse.com/cotations",
+        "https://futures.casablanca-bourse.com/marche",
+        "https://futures.casablanca-bourse.com/fr",
+    ]
+    session = requests.Session()
+    session.headers.update(HEADERS)
+    for url in urls:
+        try:
+            resp = session.get(url, timeout=20, verify=False)
+            if resp.status_code == 200 and len(resp.text) > 500:
+                data = _parse_futures_html(resp.text)
+                if data and len(data) >= 2:
+                    print(f"[scraper] OK: {url}")
+                    return data
+        except Exception as e:
+            print(f"[scraper] FAIL {url}: {e}")
+    return None
+
+
+# ─── Fallback officiel ────────────────────────────────────────────────────────
+
 def _get_futures_fallback():
-    """Données réelles de la première séance (6 avril 2026)"""
-    now = datetime.now()
+    """Donnees officielles de la 1ere seance (6 avril 2026) — BourseNews / Bourse Casa."""
+    ts = get_now_casa().strftime("%Y-%m-%d %H:%M:%S")
     return {
         "FUT-MASI20-JUN26": {
-            "label": "Juin 2026", "echeance": "2026-06-19",
-            "cours": 1309.70, "variation": -0.52, "ouverture": 1308.70,
-            "plus_haut": 1318.00, "plus_bas": 1305.00,
-            "volume_mad": 4_420_000, "nb_contrats": 337,
+            "label":"Juin 2026","echeance":"2026-06-19",
+            "cours":1309.70,"variation":-0.52,
+            "ouverture":1308.70,"plus_haut":1318.00,"plus_bas":1305.00,
+            "cloture_veille":1316.53,"volume_mad":4420000.0,"nb_contrats":337,
+            "timestamp":ts,"source":"donnees_officielles_seance1",
         },
         "FUT-MASI20-SEP26": {
-            "label": "Septembre 2026", "echeance": "2026-09-18",
-            "cours": 1299.50, "variation": -1.30, "ouverture": 1302.90,
-            "plus_haut": 1312.00, "plus_bas": 1295.00,
-            "volume_mad": 4_170_000, "nb_contrats": 321,
+            "label":"Septembre 2026","echeance":"2026-09-18",
+            "cours":1299.50,"variation":-1.30,
+            "ouverture":1302.90,"plus_haut":1312.00,"plus_bas":1295.00,
+            "cloture_veille":1316.63,"volume_mad":4170000.0,"nb_contrats":321,
+            "timestamp":ts,"source":"donnees_officielles_seance1",
         },
         "FUT-MASI20-DEC26": {
-            "label": "Décembre 2026", "echeance": "2026-12-18",
-            "cours": 1310.80, "variation": -0.49, "ouverture": 1311.30,
-            "plus_haut": 1320.50, "plus_bas": 1305.00,
-            "volume_mad": 4_720_000, "nb_contrats": 360,
+            "label":"Décembre 2026","echeance":"2026-12-18",
+            "cours":1310.80,"variation":-0.49,
+            "ouverture":1311.30,"plus_haut":1320.50,"plus_bas":1305.00,
+            "cloture_veille":1317.20,"volume_mad":4720000.0,"nb_contrats":360,
+            "timestamp":ts,"source":"donnees_officielles_seance1",
         },
         "FUT-MASI20-MAR27": {
-            "label": "Mars 2027", "echeance": "2027-03-19",
-            "cours": 1322.00, "variation": 0.30, "ouverture": 1320.70,
-            "plus_haut": 1325.00, "plus_bas": 1318.00,
-            "volume_mad": 3_660_000, "nb_contrats": 277,
+            "label":"Mars 2027","echeance":"2027-03-19",
+            "cours":1322.00,"variation":0.30,
+            "ouverture":1320.70,"plus_haut":1325.00,"plus_bas":1318.00,
+            "cloture_veille":1318.03,"volume_mad":3660000.0,"nb_contrats":277,
+            "timestamp":ts,"source":"donnees_officielles_seance1",
         },
     }
 
-def get_daily_futures_table():
+
+# ─── Point d'entree ───────────────────────────────────────────────────────────
+
+def scrape_futures_data(force_refresh=False):
     """
-    Retourne un tableau journalier prêt à afficher (comme sur le site officiel)
+    Retourne les donnees des 4 contrats Futures MASI 20.
+    1) Cache quotidien si disponible
+    2) Scraping de futures.casablanca-bourse.com
+    3) Fallback sur donnees officielles de reference
     """
-    data = scrape_futures_data()
-    rows = []
-    for key, info in data.items():
-        rows.append({
-            "Contrat": info["label"],
-            "Échéance": info["echeance"],
-            "Cours": f"{info['cours']:,.2f}",
-            "Variation": f"{info['variation']:+.2f}%",
-            "Ouverture": f"{info.get('ouverture', info['cours']):,.2f}",
-            "Plus Haut": f"{info.get('plus_haut', info['cours']):,.2f}",
-            "Plus Bas": f"{info.get('plus_bas', info['cours']):,.2f}",
-            "Volume (MAD)": f"{info['volume_mad']:,.0f}",
-            "Contrats": info["nb_contrats"],
+    if not force_refresh:
+        cached = _load_cache()
+        if cached:
+            print("[scraper] Cache valide — pas de requete reseau")
+            return cached
+
+    print("[scraper] Scraping futures.casablanca-bourse.com …")
+    data = _fetch_from_web()
+
+    if data and len(data) >= 2:
+        fallback = _get_futures_fallback()
+        for key in CONTRACTS_META:
+            if key not in data:
+                data[key] = fallback[key]
+        _save_cache(data)
+        _save_history(data)
+        return data
+
+    print("[scraper] Utilisation des donnees officielles de reference (seance 1)")
+    data = _get_futures_fallback()
+    _save_cache(data)
+    return data
+
+
+# ─── Historique ───────────────────────────────────────────────────────────────
+
+def _save_history(futures_data):
+    history = []
+    if os.path.exists(HISTORY_FILE):
+        try:
+            with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+                history = json.load(f)
+        except Exception:
+            history = []
+    today = get_now_casa().strftime("%Y-%m-%d")
+    if today not in {h.get("date") for h in history}:
+        history.append({
+            "date": today,
+            "timestamp": get_now_casa().strftime("%Y-%m-%d %H:%M:%S"),
+            "contracts": futures_data,
         })
-    
-    df = pd.DataFrame(rows)
-    # Total en bas
-    total_volume = sum(d["volume_mad"] for d in data.values())
-    total_contrats = sum(d["nb_contrats"] for d in data.values())
-    
-    return df, total_volume, total_contrats
+        history.sort(key=lambda x: x.get("date",""))
+        try:
+            with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+                json.dump(history, f, indent=2, ensure_ascii=False)
+        except IOError as e:
+            print(f"[scraper] History write error: {e}")
 
 
-def scrape_top_movers():
-    """
-    Scrape top gainers and losers from investing.com Morocco page.
-    Returns dict with 'gainers' and 'losers' lists.
-    """
+def load_history():
+    if os.path.exists(HISTORY_FILE):
+        try:
+            with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    initial = [{"date":"2026-04-06","timestamp":"2026-04-06 15:30:00","contracts":{
+        "FUT-MASI20-JUN26":{"cours":1309.70,"variation":-0.52,"ouverture":1308.70,"plus_haut":1318.00,"plus_bas":1305.00,"volume_mad":4420000,"nb_contrats":337},
+        "FUT-MASI20-SEP26":{"cours":1299.50,"variation":-1.30,"ouverture":1302.90,"plus_haut":1312.00,"plus_bas":1295.00,"volume_mad":4170000,"nb_contrats":321},
+        "FUT-MASI20-DEC26":{"cours":1310.80,"variation":-0.49,"ouverture":1311.30,"plus_haut":1320.50,"plus_bas":1305.00,"volume_mad":4720000,"nb_contrats":360},
+        "FUT-MASI20-MAR27":{"cours":1322.00,"variation":0.30,"ouverture":1320.70,"plus_haut":1325.00,"plus_bas":1318.00,"volume_mad":3660000,"nb_contrats":277},
+    }}]
     try:
-        session = _get_session()
-        url = "https://fr.investing.com/equities/morocco"
-        resp = session.get(url, timeout=15)
-        if resp.status_code == 200:
-            soup = BeautifulSoup(resp.text, "lxml")
-            movers = _parse_investing_movers(soup)
-            if movers:
-                return movers
+        with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(initial, f, indent=2, ensure_ascii=False)
+    except IOError:
+        pass
+    return initial
+
+
+# ─── MASI Index ───────────────────────────────────────────────────────────────
+
+def scrape_masi_index():
+    try:
+        s = requests.Session()
+        s.headers.update(HEADERS)
+        r = s.get("https://www.casablanca-bourse.com/fr/live-market/overview", timeout=15, verify=False)
+        if r.status_code == 200:
+            data = _parse_bourse_overview(BeautifulSoup(r.text,"lxml"))
+            if data:
+                return data
     except Exception as e:
-        print(f"[scraper] Top movers scrape error: {e}")
+        print(f"[scraper] MASI error: {e}")
+    return _get_masi_fallback()
 
-    return _get_movers_fallback()
-
-
-def _parse_investing_movers(soup):
-    """Parse top gainers/losers from Investing.com."""
+def _parse_bourse_overview(soup):
     try:
-        tables = soup.find_all("table")
-        gainers, losers = [], []
-        for table in tables:
-            rows = table.find_all("tr")
-            for row in rows[1:]:
-                cells = row.find_all("td")
-                if len(cells) >= 3:
-                    name = cells[0].get_text(strip=True)
-                    try:
-                        price = float(cells[1].get_text(strip=True).replace(",", ".").replace(" ", ""))
-                        change = float(cells[2].get_text(strip=True).replace(",", ".").replace("%", "").replace(" ", ""))
-                    except (ValueError, IndexError):
-                        continue
-                    entry = {"name": name, "price": price, "change": change}
-                    if change > 0:
-                        gainers.append(entry)
-                    elif change < 0:
-                        losers.append(entry)
-        gainers.sort(key=lambda x: x["change"], reverse=True)
-        losers.sort(key=lambda x: x["change"])
-        return {"gainers": gainers[:5], "losers": losers[:5]}
+        indices = {}
+        for elem in soup.find_all(string=re.compile(r"MASI", re.I)):
+            parent = elem.parent
+            if not parent:
+                continue
+            text = parent.get_text(separator=" ", strip=True)
+            nums = _extract_numbers(text)
+            if not nums:
+                continue
+            if re.search(r"MASI\s*20", text, re.I):
+                indices.setdefault("masi20", nums[0])
+                if len(nums) > 1:
+                    indices.setdefault("masi20_var", nums[1])
+            elif "MASI" in text:
+                indices.setdefault("masi", nums[0])
+                if len(nums) > 1:
+                    indices.setdefault("masi_var", nums[1])
+        return indices if len(indices) >= 2 else None
     except Exception:
         return None
 
+def _get_masi_fallback():
+    return {
+        "masi":17525.32,"masi_var":-0.06,
+        "masi_open":17545.07,"masi_high":17589.41,"masi_low":17424.69,
+        "masi20":1311.11,"masi20_var":-0.42,
+        "masi20_open":1316.68,"masi20_high":1320.00,"masi20_low":1309.00,
+        "timestamp": get_now_casa().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+
+# ─── Top Movers ───────────────────────────────────────────────────────────────
+
+def scrape_top_movers():
+    try:
+        s = requests.Session()
+        s.headers.update(HEADERS)
+        r = s.get("https://fr.investing.com/equities/morocco", timeout=15)
+        if r.status_code == 200:
+            m = _parse_investing_movers(BeautifulSoup(r.text,"lxml"))
+            if m:
+                return m
+    except Exception as e:
+        print(f"[scraper] Movers error: {e}")
+    return _get_movers_fallback()
+
+def _parse_investing_movers(soup):
+    try:
+        gainers, losers = [], []
+        for table in soup.find_all("table"):
+            for row in table.find_all("tr")[1:]:
+                cells = row.find_all("td")
+                if len(cells) < 3:
+                    continue
+                name = cells[0].get_text(strip=True)
+                try:
+                    price  = float(cells[1].get_text(strip=True).replace(",",".").replace(" ",""))
+                    change = float(cells[2].get_text(strip=True).replace(",",".").replace("%","").replace(" ",""))
+                except (ValueError, IndexError):
+                    continue
+                (gainers if change>0 else losers if change<0 else []).append({"name":name,"price":price,"change":change})
+        if gainers or losers:
+            return {
+                "gainers": sorted(gainers,key=lambda x:x["change"],reverse=True)[:5],
+                "losers":  sorted(losers, key=lambda x:x["change"])[:5],
+            }
+    except Exception:
+        pass
+    return None
 
 def _get_movers_fallback():
-    """Fallback top movers based on April 4, 2026 data (last session)."""
     return {
         "gainers": [
-            {"name": "Managem", "ticker": "MNG", "price": 10000.00, "change": 7.53},
-            {"name": "Lesieur Cristal", "ticker": "LBV", "price": 4180.00, "change": 8.57},
-            {"name": "CFG Bank", "ticker": "CFG", "price": 209.00, "change": 2.45},
-            {"name": "Lesieur", "ticker": "LHM", "price": 1749.00, "change": 2.35},
-            {"name": "CSR", "ticker": "CSR", "price": 192.00, "change": 1.99},
+            {"name":"Lesieur Cristal","ticker":"LBV","price":4180.00,"change":8.57},
+            {"name":"Managem",         "ticker":"MNG","price":10000.00,"change":7.53},
+            {"name":"CFG Bank",        "ticker":"CFG","price":209.00,"change":2.45},
+            {"name":"Lesieur",         "ticker":"LHM","price":1749.00,"change":2.35},
+            {"name":"CSR",             "ticker":"CSR","price":192.00,"change":1.99},
         ],
         "losers": [
-            {"name": "BCP", "ticker": "BCP", "price": 240.00, "change": -3.30},
-            {"name": "IAM", "ticker": "IAM", "price": 92.10, "change": -3.05},
-            {"name": "Sid. Maroc", "ticker": "SID", "price": 1850.00, "change": -2.80},  
-            {"name": "TotalEnergies", "ticker": "TQM", "price": 1800.00, "change": -2.54},
-            {"name": "CMA", "ticker": "CMA", "price": 1745.00, "change": -1.44},
+            {"name":"BCP",          "ticker":"BCP","price":240.00,"change":-3.30},
+            {"name":"IAM",          "ticker":"IAM","price":92.10,"change":-3.05},
+            {"name":"Sid. Maroc",   "ticker":"SID","price":1850.00,"change":-2.80},
+            {"name":"TotalEnergies","ticker":"TQM","price":1800.00,"change":-2.54},
+            {"name":"CMA",          "ticker":"CMA","price":1745.00,"change":-1.44},
         ],
     }
 
 
-# ===================================================================
-# Fonctions existantes (history, market status...) gardées telles quelles
-# ===================================================================
-# ... (je garde _save_history, load_history, generate_masi20_chart_data, 
-#      is_market_open, get_market_status exactement comme tu les avais)
-
-def _save_history(futures_data):
-    # (ton code existant)
-    history_file = os.path.join(DATA_DIR, "futures_history.json")
-    # ... (je te laisse le reste inchangé pour ne rien casser)
-    pass   # ← remplace par ton code original si tu veux
-
-# (le reste de tes fonctions : load_history, generate_masi20_chart_data, 
-#  is_market_open, get_market_status restent identiques)
-
-print("✅ scraper.py chargé avec succès - Tableau journalier disponible via get_daily_futures_table()")
-
-def load_history():
-    """Load historical futures data."""
-    history_file = os.path.join(DATA_DIR, "futures_history.json")
-    if os.path.exists(history_file):
-        try:
-            with open(history_file, "r") as f:
-                return json.load(f)
-        except (json.JSONDecodeError, IOError):
-            pass
-
-    # Generate initial history (launch day) — real data from BourseNews
-    now = datetime.now()
-    history = [
-        {
-            "date": "2026-04-06",
-            "timestamp": "2026-04-06 15:30:00",
-            "contracts": {
-                "FUT-MASI20-JUN26": {"cours": 1309.70, "volume_mad": 4420000, "nb_contrats": 337, "variation": -0.52, "ouverture": 1308.70, "plus_haut": 1318.00, "plus_bas": 1305.00},
-                "FUT-MASI20-SEP26": {"cours": 1299.50, "volume_mad": 4170000, "nb_contrats": 321, "variation": -1.30, "ouverture": 1302.90, "plus_haut": 1312.00, "plus_bas": 1295.00},
-                "FUT-MASI20-DEC26": {"cours": 1310.80, "volume_mad": 4720000, "nb_contrats": 360, "variation": -0.49, "ouverture": 1311.30, "plus_haut": 1320.50, "plus_bas": 1305.00},
-                "FUT-MASI20-MAR27": {"cours": 1322.00, "volume_mad": 3660000, "nb_contrats": 277, "variation": 0.30, "ouverture": 1320.70, "plus_haut": 1325.00, "plus_bas": 1318.00},
-            },
-        }
-    ]
-    with open(history_file, "w") as f:
-        json.dump(history, f, indent=2, ensure_ascii=False)
-    return history
-
+# ─── Graphique intraday ───────────────────────────────────────────────────────
 
 def generate_masi20_chart_data():
-    """Generate MASI 20 chart data (intraday simulation for first day)."""
-    # Simulated intraday data for the first trading day
-    base = 1326.50  # Opening
-    times = []
-    values = []
-    current = base
-    start = datetime(2026, 4, 6, 9, 30)
-    
-    for i in range(78):  # 6.5 hours of trading, 5-min intervals
-        t = start + timedelta(minutes=i * 5)
-        times.append(t.strftime("%H:%M"))
-        delta = random.gauss(-0.08, 1.2)
-        current = max(1300, min(1340, current + delta))
-        values.append(round(current, 2))
-    
-    # Ensure it ends near 1316.68
-    values[-1] = 1316.68
-    values[-2] = 1317.20
-    values[-3] = 1316.90
-    
-    return {"times": times, "values": values}
-
-
-def is_market_open():
-    """Check if the Casablanca market is currently open (GMT+1)."""
-    casablanca_tz = zoneinfo.ZoneInfo("Africa/Casablanca")
-    now = datetime.now(casablanca_tz)
-    
-    # Market hours: Monday to Friday, 09:30 → 15:30
-    weekday = now.weekday()      # 0 = lundi, 6 = dimanche
-    if weekday >= 5:             # weekend
-        return False
-    
-    hour = now.hour
-    minute = now.minute
-    
-    # Ouverture : 09:30 - 15:30 inclus
-    return (hour == 9 and minute >= 30) or (10 <= hour <= 14) or (hour == 15 and minute <= 30)
-
-def get_market_status():
-    """Get market status with next open/close time (GMT+1 Casablanca)."""
-    casablanca_tz = zoneinfo.ZoneInfo("Africa/Casablanca")
-    now = datetime.now(casablanca_tz)
-    is_open = is_market_open()
-    
-    if is_open:
-        close_time = now.replace(hour=15, minute=30, second=0, microsecond=0)
-        remaining = close_time - now
-        return {
-            "status": "OUVERTE",
-            "message": f"Séance en cours — Fermeture à 15:30",
-            "remaining": str(remaining).split(".")[0],
-        }
-    else:
-        # Calcul de la prochaine ouverture
-        weekday = now.weekday()
-        if weekday >= 5:                    # weekend
-            days_until = 7 - weekday
-        elif now.hour >= 16 or (now.hour == 15 and now.minute > 30):
-            days_until = 1 if weekday < 4 else (7 - weekday)
-        else:
-            days_until = 0
-        
-        next_open = (now + timedelta(days=days_until)).replace(
-            hour=9, minute=30, second=0, microsecond=0
-        )
-        
-        return {
-            "status": "FERMÉE",
-            "message": f"Prochaine séance: {next_open.strftime('%A %d %B à %H:%M')}",
-            "next_open": next_open.strftime("%Y-%m-%d %H:%M"),
-        }
-
-
+    import random
+    times, values = [], []
+    current = 1316.68
+    for i in range(73):
+        h = 9 + (30 + i*5)//60
+        m = (30 + i*5)%60
+        times.append(f"{h:02d}:{m:02d}")
+        current = max(1290, min(1340, current + random.gauss(-0.05,1.1)))
+        values.append(round(current,2))
+    values[-3:] = [1312.00, 1311.50, 1311.11]
+    return {"times":times,"values":values}
