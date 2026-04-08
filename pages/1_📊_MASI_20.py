@@ -11,7 +11,7 @@ import sys
 import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from scraper import scrape_masi_index, scrape_top_movers, generate_masi20_chart_data, get_market_status
+from scraper import scrape_masi_index, scrape_top_movers, generate_masi20_chart_data, get_market_status, get_now_casa
 
 st.set_page_config(page_title="MASI 20 — MAT Platform", page_icon="📊", layout="wide")
 
@@ -130,6 +130,35 @@ masi_data = scrape_masi_index()
 chart_data = generate_masi20_chart_data()
 movers = scrape_top_movers()
 market = get_market_status()
+
+# ─── Status + Heure GMT+1 ───
+status_color = "#10B981" if market["status"] == "OUVERTE" else "#EF4444"
+rgb = "16,185,129" if market["status"] == "OUVERTE" else "239,68,68"
+st.markdown(f"""
+<div style="display:flex; justify-content:space-between; align-items:center;
+    margin-bottom:1.2rem; flex-wrap:wrap; gap:0.5rem;">
+    <span style="font-family:'DM Sans',sans-serif; font-size:0.78rem; color:#4B5563;">
+        ⏱ <span id="masi-clock" style="font-family:'Space Mono',monospace; color:#9CA3AF;">--:--:--</span>
+        &nbsp;GMT+1
+    </span>
+    <span style="font-family:'Space Mono',monospace; font-size:0.78rem; color:{status_color};
+        background:rgba({rgb},0.1); padding:4px 14px; border-radius:20px;
+        border:1px solid {status_color}40;">
+        ● Séance {market['status']} &nbsp;·&nbsp; {market.get('message','')}
+    </span>
+</div>
+<script>
+(function(){{
+    function t(){{
+        var n=new Date(),u=n.getTime()+n.getTimezoneOffset()*60000,c=new Date(u+3600000);
+        var el=document.getElementById('masi-clock');
+        if(el) el.textContent=String(c.getHours()).padStart(2,'0')+':'+
+            String(c.getMinutes()).padStart(2,'0')+':'+String(c.getSeconds()).padStart(2,'0');
+    }}
+    t(); setInterval(t,1000);
+}})();
+</script>
+""", unsafe_allow_html=True)
 
 # ─── Index Cards ───
 col1, col2 = st.columns(2)
