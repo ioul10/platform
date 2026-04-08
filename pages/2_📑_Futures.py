@@ -647,7 +647,6 @@ st.dataframe(
     },
 )
 
-
 # ─── Footer ───
 st.markdown("""
 <div style="text-align:center; padding:2rem 0 1rem; margin-top:2rem; border-top:1px solid rgba(212,168,67,0.08);">
