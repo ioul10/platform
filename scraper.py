@@ -531,25 +531,23 @@ def generate_masi20_chart_data():
     """
     masi_data = scrape_masi_index()
     
-    open_price   = masi_data.get("masi20_open", 1316.68)
+    open_price    = masi_data.get("masi20_open", 1316.68)
     current_price = masi_data.get("masi20", 1311.11)
-    high_price   = masi_data.get("masi20_high", max(open_price, current_price) + 10)
-    low_price    = masi_data.get("masi20_low",  min(open_price, current_price) - 10)
+    high_price    = masi_data.get("masi20_high", max(open_price, current_price) + 10)
+    low_price     = masi_data.get("masi20_low",  min(open_price, current_price) - 10)
 
-    now = get_now_casa()
+    now = get_now_casa()                                   # ← datetime avec timezone Casablanca
     today = now.date()
 
-    # Heure de début de séance
-    start_time = datetime.combine(today, datetime.min.time()).replace(hour=9, minute=30)
+    # Heure de début de séance (9:30) avec le même timezone
+    start_time = now.replace(hour=9, minute=30, second=0, microsecond=0)
 
-    # Calcul du nombre de points à afficher (jusqu'à maintenant)
+    # Calcul du nombre de points à afficher
     if is_market_open():
         minutes_elapsed = int((now - start_time).total_seconds() // 60)
-        # On arrondit au multiple de 5 minutes
         num_points = max(1, (minutes_elapsed // 5) + 1)
     else:
-        # Marché fermé → on affiche toute la séance
-        num_points = 78
+        num_points = 78  # marché fermé → on affiche toute la journée
 
     times = []
     values = []
@@ -560,15 +558,16 @@ def generate_masi20_chart_data():
         t = start_time + timedelta(minutes=i * 5)
         times.append(t.strftime("%H:%M"))
         
-        # Évolution réaliste
+        # Évolution réaliste vers la valeur actuelle
         progress = (i + 1) / max(78, num_points)
         trend = (current_price - open_price) * progress
         noise = np.random.normal(0, 0.55)
         current = open_price + trend + noise
+        
         current = max(low_price, min(high_price, current))
         values.append(round(current, 2))
 
-    # Dernière valeur = valeur réelle actuelle
+    # Force la dernière valeur = valeur réelle du MASI 20
     values[-1] = round(current_price, 2)
 
     return {
