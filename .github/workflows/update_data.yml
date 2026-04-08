@@ -2,40 +2,78 @@ name: 📊 Update Futures Data
 
 on:
   schedule:
-    # Run at 15:35 UTC+1 (14:35 UTC) Monday-Friday
+    # 15:35 heure Casablanca (GMT+1) = 14:35 UTC, Lundi-Vendredi
     - cron: '35 14 * * 1-5'
-  workflow_dispatch: # Allow manual trigger
+    # 2ème passage à 16:00 heure Casa (15:00 UTC) pour s'assurer de la capture
+    - cron: '0 15 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      force_refresh:
+        description: 'Forcer le rafraîchissement (ignorer le cache)'
+        required: false
+        default: 'true'
+        type: boolean
 
 jobs:
   update-data:
     runs-on: ubuntu-latest
-    
+    timeout-minutes: 10
+
     steps:
-      - name: Checkout
+      - name: 📥 Checkout
         uses: actions/checkout@v4
-      
-      - name: Setup Python
+
+      - name: 🐍 Setup Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      
-      - name: Install dependencies
+          cache: 'pip'
+
+      - name: 📦 Install dependencies
         run: pip install -r requirements.txt
-      
-      - name: Scrape and save data
+
+      - name: 🌐 Scrape futures.casablanca-bourse.com
         run: |
-          python -c "
-          from scraper import scrape_futures_data, _save_history
-          data = scrape_futures_data()
-          _save_history(data)
-          print('Data updated successfully')
-          print(f'Contracts: {list(data.keys())}')
+          python - << 'PYEOF'
+          import sys
+          from scraper import scrape_futures_data, _save_history, get_now_casa
+
+          now = get_now_casa()
+          print(f"=== Scraping lancé le {now.strftime('%d/%m/%Y %H:%M:%S')} (GMT+1) ===")
+
+          # Force refresh pour ignorer le cache en CI
+          data = scrape_futures_data(force_refresh=True)
+
+          if not data:
+              print("ERREUR: aucune donnée récupérée")
+              sys.exit(1)
+
+          print(f"\n✓ {len(data)} contrats récupérés:")
+          total_vol = 0
+          total_ctr = 0
           for k, v in data.items():
-              print(f'  {k}: {v.get(\"cours\", \"N/A\")} pts')
-          "
-      
-      - name: Commit and push
+              cours = v.get('cours', 0)
+              var   = v.get('variation', 0)
+              vol   = v.get('volume_mad') or 0
+              nb    = v.get('nb_contrats') or 0
+              src   = v.get('source', 'N/A')
+              sign  = '+' if var >= 0 else ''
+              total_vol += vol
+              total_ctr += nb
+              print(f"  {k}: {cours:,.2f} pts ({sign}{var:.2f}%) | Vol: {vol:,.0f} MAD | Ctr: {nb} | Src: {src}")
+
+          print(f"\n  Total volume : {total_vol:,.0f} MAD")
+          print(f"  Total contrats : {total_ctr}")
+
+          # Sauvegarder dans l'historique
+          _save_history(data)
+          print(f"\n✓ Historique mis à jour")
+          PYEOF
+
+      - name: 💾 Commit & Push
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "📊 Auto-update futures data - $(date +'%Y-%m-%d %H:%M')"
+          commit_message: "📊 Futures data — ${{ github.run_number }} — $(TZ='Africa/Casablanca' date +'%Y-%m-%d %H:%M GMT+1')"
           file_pattern: "data/*.json"
+          commit_user_name: "MAT-Bot"
+          commit_user_email: "mat-bot@noreply.github.com"
