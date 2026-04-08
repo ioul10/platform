@@ -6,10 +6,10 @@ V1 — Plateforme de suivi des Futures MASI 20
 import streamlit as st
 from datetime import datetime
 import locale
-from zoneinfo import ZoneInfo
-import streamlit.components.v1 as components
-import zoneinfo
-
+import sys
+import os
+sys.path.insert(0, os.path.dirname(__file__))
+from scraper import get_now_casa, get_market_status, scrape_masi_index, scrape_futures_data
 
 # ─── Page Config ───
 st.set_page_config(
@@ -313,9 +313,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# ─── Import scraper ───
-from scraper import get_market_status, scrape_masi_index
-
 # ─── Sidebar ───
 with st.sidebar:
     st.markdown("# 🏛️ MAT Platform")
@@ -327,10 +324,45 @@ with st.sidebar:
     st.markdown("- **MASI 20** — Indice & Top movers")
     st.markdown("- **Futures** — Contrats & Historique")
     st.markdown("---")
+
+    # Heure dynamique dans la sidebar
+    st.markdown("""
+<div style="font-family:'Space Mono',monospace; font-size:0.75rem; color:#6B7280; text-align:center;">
+    🕐 Heure de Casablanca (GMT+1)
+</div>
+<div id="sb-clock" style="font-family:'Space Mono',monospace; font-size:1.1rem; color:#D4A843;
+    text-align:center; letter-spacing:2px; margin:0.3rem 0;">--:--:--</div>
+<script>
+(function(){
+    function t(){
+        var n=new Date(), u=n.getTime()+n.getTimezoneOffset()*60000, c=new Date(u+3600000);
+        var el=document.getElementById('sb-clock');
+        if(el) el.textContent=String(c.getHours()).padStart(2,'0')+':'+
+            String(c.getMinutes()).padStart(2,'0')+':'+String(c.getSeconds()).padStart(2,'0');
+    }
+    t(); setInterval(t,1000);
+})();
+</script>
+""", unsafe_allow_html=True)
+
+    st.markdown("---")
     st.markdown("⏰ **Horaires de séance**")
     st.markdown("Lun-Ven: 09:30 → 15:30")
+
+    # Statut marché dans sidebar
+    _sb_mkt = get_market_status()
+    _sb_col = "#10B981" if _sb_mkt["status"] == "OUVERTE" else "#EF4444"
+    st.markdown(f"""
+<div style="font-family:'Space Mono',monospace; font-size:0.75rem; color:{_sb_col};
+    background:rgba(0,0,0,0.3); border:1px solid {_sb_col}40; border-radius:8px;
+    padding:6px 10px; text-align:center; margin-top:0.5rem;">
+    ● {_sb_mkt['status']}
+</div>
+<div style="font-family:'DM Sans',sans-serif; font-size:0.7rem; color:#4B5563;
+    text-align:center; margin-top:0.3rem;">{_sb_mkt.get('message','')}</div>
+""", unsafe_allow_html=True)
     st.markdown("---")
-    st.caption("Données: Bourse de Casablanca")
+    st.caption("Source : futures.casablanca-bourse.com")
     if st.button("🔄 Rafraîchir les données"):
         st.cache_data.clear()
         st.rerun()
@@ -343,140 +375,129 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# ─── Clock & Status Dynamique (GMT+1 Casablanca) ───
-import streamlit.components.v1 as components
-import zoneinfo
-from datetime import datetime
-
-casablanca_tz = zoneinfo.ZoneInfo("Africa/Casablanca")
-now = datetime.now(casablanca_tz)
-
+# ─── Clock & Status (GMT+1 Casablanca) ───
+now = get_now_casa()
 market = get_market_status()
+# Charger futures ici pour le ticker (sera réutilisé plus bas)
+futures_ticker = scrape_futures_data()
 
 status_class = "status-open" if market["status"] == "OUVERTE" else "status-closed"
 dot_class = "pulse-green" if market["status"] == "OUVERTE" else "pulse-red"
 
-# === Traduction française forcée ===
-jours = {
-    "Monday": "Lundi", "Tuesday": "Mardi", "Wednesday": "Mercredi",
-    "Thursday": "Jeudi", "Friday": "Vendredi", "Saturday": "Samedi", "Sunday": "Dimanche"
-}
-mois = {
-    "January": "janvier", "February": "février", "March": "mars", "April": "avril",
-    "May": "mai", "June": "juin", "July": "juillet", "August": "août",
-    "September": "septembre", "October": "octobre", "November": "novembre", "December": "décembre"
-}
+# Horloge dynamique JS (mise à jour chaque seconde, heure Casa GMT+1)
+st.markdown("""
+<div id="casa-clock" style="font-family:'Space Mono',monospace;font-size:3rem;font-weight:700;
+     color:#E5E7EB;text-align:center;letter-spacing:4px;margin:0.5rem 0;">
+     --:--:--
+</div>
+<div id="casa-date" style="font-family:'DM Sans',sans-serif;font-size:0.9rem;color:#6B7280;
+     text-align:center;letter-spacing:2px;text-transform:uppercase;margin-bottom:0.5rem;">
+</div>
+<script>
+(function() {
+    const DAYS_FR = ["Dimanche","Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi"];
+    const MONTHS_FR = ["Janvier","Février","Mars","Avril","Mai","Juin",
+                       "Juillet","Août","Septembre","Octobre","Novembre","Décembre"];
+    function tick() {
+        // Heure Casa = UTC+1 (Africa/Casablanca)
+        const now = new Date();
+        const utc = now.getTime() + now.getTimezoneOffset() * 60000;
+        const casa = new Date(utc + 3600000); // GMT+1
+        const h = String(casa.getHours()).padStart(2,'0');
+        const m = String(casa.getMinutes()).padStart(2,'0');
+        const s = String(casa.getSeconds()).padStart(2,'0');
+        const el = document.getElementById('casa-clock');
+        const el2 = document.getElementById('casa-date');
+        if (el) el.textContent = h + ':' + m + ':' + s;
+        if (el2) {
+            const day = DAYS_FR[casa.getDay()];
+            const date = casa.getDate();
+            const month = MONTHS_FR[casa.getMonth()];
+            const year = casa.getFullYear();
+            el2.textContent = day + ' ' + date + ' ' + month + ' ' + year;
+        }
+    }
+    tick();
+    setInterval(tick, 1000);
+})();
+</script>
+""", unsafe_allow_html=True)
 
-date_anglais = now.strftime("%A %d %B %Y")
-date_fr = date_anglais
-for en, fr in jours.items():
-    date_fr = date_fr.replace(en, fr)
-for en, fr in mois.items():
-    date_fr = date_fr.replace(en, fr)
-
-clock_html = f"""
-<div style="text-align: center; padding: 2rem 0 2.5rem; 
-            background: linear-gradient(180deg, #060A13, #0A0E17); 
-            border-radius: 20px; margin: 1rem 0;">
-
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@700&family=DM+Sans:wght@400;500&display=swap');
-        
-        .mat-clock {{
-            font-family: 'Space Mono', monospace !important;
-            font-size: 3.8rem !important;
-            font-weight: 700 !important;
-            color: #E5E7EB;
-            letter-spacing: 6px;
-            text-shadow: 0 0 20px rgba(212, 168, 67, 0.3);
-            margin-bottom: 0.4rem;
-        }}
-        
-        .mat-date {{
-            font-family: 'DM Sans', sans-serif;
-            color: #6B7280;
-            font-size: 1.1rem;
-            letter-spacing: 2px;
-            text-transform: capitalize;
-            margin-bottom: 1.8rem;
-        }}
-        
-        .status-badge {{
-            display: inline-flex;
-            align-items: center;
-            gap: 12px;
-            background: rgba(16, 185, 129, 0.15);
-            border: 2px solid rgba(16, 185, 129, 0.4);
-            color: #10B981;
-            font-family: 'Space Mono', monospace;
-            font-size: 1.1rem;
-            font-weight: 700;
-            letter-spacing: 2px;
-            padding: 14px 38px;
-            border-radius: 50px;
-            text-transform: uppercase;
-            box-shadow: 0 0 25px rgba(16, 185, 129, 0.25);
-        }}
-        
-        .pulse-dot {{
-            width: 12px;
-            height: 12px;
-            background: #10B981;
-            border-radius: 50%;
-            box-shadow: 0 0 12px #10B981;
-            animation: pulse 2s ease-in-out infinite;
-        }}
-        
-        @keyframes pulse {{
-            0%, 100% {{ opacity: 1; transform: scale(1); }}
-            50% {{ opacity: 0.4; transform: scale(0.7); }}
-        }}
-        
-        .message {{
-            color: #9CA3AF;
-            font-family: 'DM Sans', sans-serif;
-            font-size: 0.95rem;
-            margin-top: 1.2rem;
-            letter-spacing: 1px;
-        }}
-    </style>
-
-    <div class="mat-clock" id="live-clock">{now.strftime("%H:%M:%S")}</div>
-    <div class="mat-date">{date_fr}</div>
-
-    <div>
-        <div class="status-badge">
-            <span class="pulse-dot"></span>
-            SÉANCE {market["status"]}
-        </div>
-    </div>
-    
-    <div class="message">
-        {market["message"]}
+st.markdown(f"""
+<div style="text-align:center;">
+    <div class="status-badge {status_class}">
+        <span class="pulse-dot {dot_class}"></span>
+        SÉANCE {market["status"]}
     </div>
 </div>
+<p style="text-align:center; color:#6B7280; font-family:'DM Sans',sans-serif; font-size:0.85rem; margin-top:0.8rem;">
+    {market["message"]} &nbsp;·&nbsp; <span style="color:#4B5563;">Heure de Casablanca (GMT+1)</span>
+</p>
+""", unsafe_allow_html=True)
 
-<script>
-    function updateClock() {{
-        const now = new Date();
-        const casablancaTime = new Date(now.getTime() + (now.getTimezoneOffset() * 60000) + 3600000);
-        const hours = String(casablancaTime.getHours()).padStart(2, '0');
-        const minutes = String(casablancaTime.getMinutes()).padStart(2, '0');
-        const seconds = String(casablancaTime.getSeconds()).padStart(2, '0');
-        document.getElementById("live-clock").textContent = hours + ":" + minutes + ":" + seconds;
-    }}
-    setInterval(updateClock, 1000);
-    updateClock();
-</script>
-"""
+# ─── Futures Ticker Strip ───
+_ticker_items = []
+for _k, _v in futures_ticker.items():
+    _var = _v.get("variation", 0)
+    _col = "#10B981" if _var >= 0 else "#EF4444"
+    _arr = "▲" if _var >= 0 else "▼"
+    _sign = "+" if _var >= 0 else ""
+    _label = _v.get("label", _k)
+    _cours = _v.get("cours", 0)
+    _ticker_items.append(
+        f'<span style="margin:0 2rem; white-space:nowrap;">'
+        f'<span style="color:#D4A843; font-weight:700;">FUT MASI20 {_label}</span>'
+        f' &nbsp; <span style="color:#E5E7EB;">{_cours:,.2f}</span>'
+        f' &nbsp; <span style="color:{_col};">{_arr} {_sign}{_var:.2f}%</span>'
+        f'</span>'
+    )
+_ticker_html = " &nbsp;·&nbsp; ".join(_ticker_items)
+# Dupliquer pour l'animation loop
+_ticker_full = _ticker_html + " &nbsp;&nbsp;&nbsp; " + _ticker_html
 
-components.html(clock_html, height=280, scrolling=False)
+st.markdown(f"""
+<style>
+@keyframes ticker-scroll {{
+    0%   {{ transform: translateX(0); }}
+    100% {{ transform: translateX(-50%); }}
+}}
+.futures-ticker-wrap {{
+    overflow: hidden;
+    background: rgba(212,168,67,0.05);
+    border-top: 1px solid rgba(212,168,67,0.15);
+    border-bottom: 1px solid rgba(212,168,67,0.15);
+    padding: 8px 0;
+    margin: 1.2rem 0;
+}}
+.futures-ticker-inner {{
+    display: inline-flex;
+    animation: ticker-scroll 22s linear infinite;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.82rem;
+    white-space: nowrap;
+}}
+.futures-ticker-wrap:hover .futures-ticker-inner {{
+    animation-play-state: paused;
+}}
+</style>
+<div class="futures-ticker-wrap">
+    <div class="futures-ticker-inner">{_ticker_full}</div>
+</div>
+""", unsafe_allow_html=True)
+
 # ─── Key Metrics ───
 masi_data = scrape_masi_index()
+futures_data = futures_ticker  # déjà chargé plus haut
+
 masi_change_class = "metric-change-up" if masi_data.get("masi_var", 0) >= 0 else "metric-change-down"
 masi20_change_class = "metric-change-up" if masi_data.get("masi20_var", 0) >= 0 else "metric-change-down"
 masi_sign = "+" if masi_data.get("masi_var", 0) >= 0 else ""
 masi20_sign = "+" if masi_data.get("masi20_var", 0) >= 0 else ""
+
+# Calculer les totaux depuis les données futures
+total_contrats = sum(v.get("nb_contrats") or 0 for v in futures_data.values())
+total_volume   = sum(v.get("volume_mad") or 0 for v in futures_data.values())
+total_vol_str  = f"{total_volume/1_000_000:.2f} M" if total_volume >= 1_000_000 else f"{total_volume:,.0f}"
 
 st.markdown(f"""
 <div class="metric-strip">
@@ -488,10 +509,10 @@ st.markdown(f"""
         </div>
     </div>
     <div class="metric-item">
-        <div class="metric-value">{masi_data.get('masi20', 1316.68):,.2f}</div>
+        <div class="metric-value">{masi_data.get('masi20', 1311.11):,.2f}</div>
         <div class="metric-label">MASI 20</div>
         <div class="{masi20_change_class}" style="font-family:'Space Mono',monospace; font-size:0.85rem;">
-            {masi20_sign}{masi_data.get('masi20_var', -0.77):.2f}%
+            {masi20_sign}{masi_data.get('masi20_var', -0.42):.2f}%
         </div>
     </div>
     <div class="metric-item">
@@ -499,8 +520,12 @@ st.markdown(f"""
         <div class="metric-label">Contrats Futures</div>
     </div>
     <div class="metric-item">
-        <div class="metric-value">1 295</div>
+        <div class="metric-value">{total_contrats:,}</div>
         <div class="metric-label">Contrats échangés</div>
+    </div>
+    <div class="metric-item">
+        <div class="metric-value">{total_vol_str}</div>
+        <div class="metric-label">Volume (MAD)</div>
     </div>
 </div>
 """, unsafe_allow_html=True)
