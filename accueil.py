@@ -6,10 +6,6 @@ V1 — Plateforme de suivi des Futures MASI 20
 import streamlit as st
 from datetime import datetime
 import locale
-import sys
-import os
-sys.path.insert(0, os.path.dirname(__file__))
-from scraper import get_now_casa, get_market_status, scrape_masi_index, scrape_futures_data
 
 # ─── Page Config ───
 st.set_page_config(
@@ -313,6 +309,9 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
+# ─── Import scraper ───
+from scraper import get_market_status, scrape_masi_index
+
 # ─── Sidebar ───
 with st.sidebar:
     st.markdown("# 🏛️ MAT Platform")
@@ -324,46 +323,34 @@ with st.sidebar:
     st.markdown("- **MASI 20** — Indice & Top movers")
     st.markdown("- **Futures** — Contrats & Historique")
     st.markdown("---")
-
-    # Heure dynamique dans la sidebar
-    st.markdown("""
-<div style="font-family:'Space Mono',monospace; font-size:0.75rem; color:#6B7280; text-align:center;">
-    🕐 Heure de Casablanca (GMT+1)
-</div>
-<div id="sb-clock" style="font-family:'Space Mono',monospace; font-size:1.1rem; color:#D4A843;
-    text-align:center; letter-spacing:2px; margin:0.3rem 0;">--:--:--</div>
-<script>
-(function(){
-    function t(){
-        var n=new Date(), u=n.getTime()+n.getTimezoneOffset()*60000, c=new Date(u+3600000);
-        var el=document.getElementById('sb-clock');
-        if(el) el.textContent=String(c.getHours()).padStart(2,'0')+':'+
-            String(c.getMinutes()).padStart(2,'0')+':'+String(c.getSeconds()).padStart(2,'0');
-    }
-    t(); setInterval(t,1000);
-})();
-</script>
-""", unsafe_allow_html=True)
-
-    st.markdown("---")
     st.markdown("⏰ **Horaires de séance**")
     st.markdown("Lun-Ven: 09:30 → 15:30")
-
-    # Statut marché dans sidebar
-    _sb_mkt = get_market_status()
-    _sb_col = "#10B981" if _sb_mkt["status"] == "OUVERTE" else "#EF4444"
-    st.markdown(f"""
-<div style="font-family:'Space Mono',monospace; font-size:0.75rem; color:{_sb_col};
-    background:rgba(0,0,0,0.3); border:1px solid {_sb_col}40; border-radius:8px;
-    padding:6px 10px; text-align:center; margin-top:0.5rem;">
-    ● {_sb_mkt['status']}
-</div>
-<div style="font-family:'DM Sans',sans-serif; font-size:0.7rem; color:#4B5563;
-    text-align:center; margin-top:0.3rem;">{_sb_mkt.get('message','')}</div>
-""", unsafe_allow_html=True)
     st.markdown("---")
-    st.caption("Source : futures.casablanca-bourse.com")
+    
+    # Cache status
+    import os, json as _json
+    cache_file = os.path.join(os.path.dirname(__file__), "data", "cache", "masi_index.json")
+    if os.path.exists(cache_file):
+        try:
+            with open(cache_file) as _f:
+                _cached = _json.load(_f)
+            _cached_at = datetime.fromisoformat(_cached["_cached_at"])
+            _age_min = (datetime.now() - _cached_at).total_seconds() / 60
+            if _age_min < 60:
+                _age_str = f"{int(_age_min)} min"
+            else:
+                _age_str = f"{_age_min/60:.1f} h"
+            st.caption(f"🕒 Données mises à jour il y a **{_age_str}**")
+        except Exception:
+            st.caption("Données: Bourse de Casablanca")
+    else:
+        st.caption("Données: Bourse de Casablanca")
+    
+    st.caption("Cache: 4h · Auto-update via GitHub")
+    
     if st.button("🔄 Rafraîchir les données"):
+        from scraper import clear_cache
+        clear_cache()
         st.cache_data.clear()
         st.rerun()
 
@@ -375,55 +362,16 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# ─── Clock & Status (GMT+1 Casablanca) ───
-now = get_now_casa()
+# ─── Clock & Status ───
+now = datetime.now()
 market = get_market_status()
-# Charger futures ici pour le ticker (sera réutilisé plus bas)
-futures_ticker = scrape_futures_data()
 
 status_class = "status-open" if market["status"] == "OUVERTE" else "status-closed"
 dot_class = "pulse-green" if market["status"] == "OUVERTE" else "pulse-red"
 
-# Horloge dynamique JS (mise à jour chaque seconde, heure Casa GMT+1)
-st.markdown("""
-<div id="casa-clock" style="font-family:'Space Mono',monospace;font-size:3rem;font-weight:700;
-     color:#E5E7EB;text-align:center;letter-spacing:4px;margin:0.5rem 0;">
-     --:--:--
-</div>
-<div id="casa-date" style="font-family:'DM Sans',sans-serif;font-size:0.9rem;color:#6B7280;
-     text-align:center;letter-spacing:2px;text-transform:uppercase;margin-bottom:0.5rem;">
-</div>
-<script>
-(function() {
-    const DAYS_FR = ["Dimanche","Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi"];
-    const MONTHS_FR = ["Janvier","Février","Mars","Avril","Mai","Juin",
-                       "Juillet","Août","Septembre","Octobre","Novembre","Décembre"];
-    function tick() {
-        // Heure Casa = UTC+1 (Africa/Casablanca)
-        const now = new Date();
-        const utc = now.getTime() + now.getTimezoneOffset() * 60000;
-        const casa = new Date(utc + 3600000); // GMT+1
-        const h = String(casa.getHours()).padStart(2,'0');
-        const m = String(casa.getMinutes()).padStart(2,'0');
-        const s = String(casa.getSeconds()).padStart(2,'0');
-        const el = document.getElementById('casa-clock');
-        const el2 = document.getElementById('casa-date');
-        if (el) el.textContent = h + ':' + m + ':' + s;
-        if (el2) {
-            const day = DAYS_FR[casa.getDay()];
-            const date = casa.getDate();
-            const month = MONTHS_FR[casa.getMonth()];
-            const year = casa.getFullYear();
-            el2.textContent = day + ' ' + date + ' ' + month + ' ' + year;
-        }
-    }
-    tick();
-    setInterval(tick, 1000);
-})();
-</script>
-""", unsafe_allow_html=True)
-
 st.markdown(f"""
+<div class="mat-clock">{now.strftime("%H:%M:%S")}</div>
+<div class="mat-date">{now.strftime("%A %d %B %Y").capitalize()}</div>
 <div style="text-align:center;">
     <div class="status-badge {status_class}">
         <span class="pulse-dot {dot_class}"></span>
@@ -431,73 +379,16 @@ st.markdown(f"""
     </div>
 </div>
 <p style="text-align:center; color:#6B7280; font-family:'DM Sans',sans-serif; font-size:0.85rem; margin-top:0.8rem;">
-    {market["message"]} &nbsp;·&nbsp; <span style="color:#4B5563;">Heure de Casablanca (GMT+1)</span>
+    {market["message"]}
 </p>
-""", unsafe_allow_html=True)
-
-# ─── Futures Ticker Strip ───
-_ticker_items = []
-for _k, _v in futures_ticker.items():
-    _var = _v.get("variation", 0)
-    _col = "#10B981" if _var >= 0 else "#EF4444"
-    _arr = "▲" if _var >= 0 else "▼"
-    _sign = "+" if _var >= 0 else ""
-    _label = _v.get("label", _k)
-    _cours = _v.get("cours", 0)
-    _ticker_items.append(
-        f'<span style="margin:0 2rem; white-space:nowrap;">'
-        f'<span style="color:#D4A843; font-weight:700;">FUT MASI20 {_label}</span>'
-        f' &nbsp; <span style="color:#E5E7EB;">{_cours:,.2f}</span>'
-        f' &nbsp; <span style="color:{_col};">{_arr} {_sign}{_var:.2f}%</span>'
-        f'</span>'
-    )
-_ticker_html = " &nbsp;·&nbsp; ".join(_ticker_items)
-# Dupliquer pour l'animation loop
-_ticker_full = _ticker_html + " &nbsp;&nbsp;&nbsp; " + _ticker_html
-
-st.markdown(f"""
-<style>
-@keyframes ticker-scroll {{
-    0%   {{ transform: translateX(0); }}
-    100% {{ transform: translateX(-50%); }}
-}}
-.futures-ticker-wrap {{
-    overflow: hidden;
-    background: rgba(212,168,67,0.05);
-    border-top: 1px solid rgba(212,168,67,0.15);
-    border-bottom: 1px solid rgba(212,168,67,0.15);
-    padding: 8px 0;
-    margin: 1.2rem 0;
-}}
-.futures-ticker-inner {{
-    display: inline-flex;
-    animation: ticker-scroll 22s linear infinite;
-    font-family: 'Space Mono', monospace;
-    font-size: 0.82rem;
-    white-space: nowrap;
-}}
-.futures-ticker-wrap:hover .futures-ticker-inner {{
-    animation-play-state: paused;
-}}
-</style>
-<div class="futures-ticker-wrap">
-    <div class="futures-ticker-inner">{_ticker_full}</div>
-</div>
 """, unsafe_allow_html=True)
 
 # ─── Key Metrics ───
 masi_data = scrape_masi_index()
-futures_data = futures_ticker  # déjà chargé plus haut
-
 masi_change_class = "metric-change-up" if masi_data.get("masi_var", 0) >= 0 else "metric-change-down"
 masi20_change_class = "metric-change-up" if masi_data.get("masi20_var", 0) >= 0 else "metric-change-down"
 masi_sign = "+" if masi_data.get("masi_var", 0) >= 0 else ""
 masi20_sign = "+" if masi_data.get("masi20_var", 0) >= 0 else ""
-
-# Calculer les totaux depuis les données futures
-total_contrats = sum(v.get("nb_contrats") or 0 for v in futures_data.values())
-total_volume   = sum(v.get("volume_mad") or 0 for v in futures_data.values())
-total_vol_str  = f"{total_volume/1_000_000:.2f} M" if total_volume >= 1_000_000 else f"{total_volume:,.0f}"
 
 st.markdown(f"""
 <div class="metric-strip">
@@ -509,10 +400,10 @@ st.markdown(f"""
         </div>
     </div>
     <div class="metric-item">
-        <div class="metric-value">{masi_data.get('masi20', 1311.11):,.2f}</div>
+        <div class="metric-value">{masi_data.get('masi20', 1316.68):,.2f}</div>
         <div class="metric-label">MASI 20</div>
         <div class="{masi20_change_class}" style="font-family:'Space Mono',monospace; font-size:0.85rem;">
-            {masi20_sign}{masi_data.get('masi20_var', -0.42):.2f}%
+            {masi20_sign}{masi_data.get('masi20_var', -0.77):.2f}%
         </div>
     </div>
     <div class="metric-item">
@@ -520,12 +411,8 @@ st.markdown(f"""
         <div class="metric-label">Contrats Futures</div>
     </div>
     <div class="metric-item">
-        <div class="metric-value">{total_contrats:,}</div>
+        <div class="metric-value">1 295</div>
         <div class="metric-label">Contrats échangés</div>
-    </div>
-    <div class="metric-item">
-        <div class="metric-value">{total_vol_str}</div>
-        <div class="metric-label">Volume (MAD)</div>
     </div>
 </div>
 """, unsafe_allow_html=True)
