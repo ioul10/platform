@@ -555,7 +555,14 @@ def generate_masi20_chart_data():
     values[-1] = 1311.11
     values[-2] = 1311.50
     values[-3] = 1312.00
-    return {"times": times, "values": values}
+    return {
+        "times": times,
+        "values": values,
+        "open": base,
+        "high": max(values),
+        "low": min(values),
+        "close": values[-1],
+    }
 
 
 def get_now_casa():
