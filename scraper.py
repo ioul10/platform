@@ -558,8 +558,15 @@ def generate_masi20_chart_data():
     return {"times": times, "values": values}
 
 
+def get_now_casa():
+    """Retourne l'heure actuelle a Casablanca (UTC+1, pas de DST)."""
+    # Casablanca est en UTC+1 toute l'annee (pas de changement d'heure depuis 2018)
+    utc_now = datetime.utcnow()
+    return utc_now + timedelta(hours=1)
+
+
 def is_market_open():
-    now = datetime.now()
+    now = get_now_casa()
     if now.weekday() >= 5:
         return False
     h, m = now.hour, now.minute
@@ -567,7 +574,7 @@ def is_market_open():
 
 
 def get_market_status():
-    now = datetime.now()
+    now = get_now_casa()
     if is_market_open():
         close_time = now.replace(hour=15, minute=30, second=0)
         remaining = close_time - now
