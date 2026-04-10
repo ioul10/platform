@@ -562,6 +562,7 @@ def generate_masi20_chart_data():
         "high": max(values),
         "low": min(values),
         "close": values[-1],
+        "is_market_open": is_market_open(),
     }
 
 
