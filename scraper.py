@@ -173,76 +173,146 @@ def _scrape_tradingeconomics_masi():
 
 
 def _scrape_lematin_indices():
-    """Parse les indices depuis lematin.ma/bourse-de-casablanca/API/start/"""
+    """
+    Parse les indices depuis lematin.ma.
+    
+    Strategie: 2 passes
+      1. Page principale -> MASI flottant (bloc texte apres "INDICE MASI ® Flottant")
+      2. Page dediee MASI 20 -> toutes les donnees (Veille, Ouverture, +Haut, +Bas, Var%)
+    """
+    data = {"timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+    session = _get_session()
+
+    # ==== PASSE 1 : Page principale pour MASI flottant ====
     try:
-        session = _get_session()
         url = "https://lematin.ma/bourse-de-casablanca/API/start/"
         resp = session.get(url, timeout=15)
-        if resp.status_code != 200:
-            print(f"[scraper] lematin.ma status: {resp.status_code}")
-            return None
-
-        soup = BeautifulSoup(resp.text, "lxml")
-        data = {"timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
-
-        # Les indices sont dans des liens <a href="/bourse-de-casablanca/indice/...">
-        index_blocks = soup.find_all("a", href=re.compile(r"/bourse-de-casablanca/indice/"))
-        for block in index_blocks:
-            block_text = block.get_text(separator="|", strip=True)
-            parts = [p.strip() for p in block_text.split("|") if p.strip()]
-
-            is_masi20 = any("MASI 20" in p or "MSI 20" in p for p in parts)
-            is_masi_main = any(("MASI" in p and "Flottant" in p) for p in parts)
-
-            nums = []
-            for p in parts:
-                # Chercher les parties qui ressemblent a des nombres
-                cleaned = p.replace("pts", "").replace("%", "").strip()
-                n = _clean_number(cleaned)
-                if n is not None:
-                    nums.append(n)
-
-            if is_masi20 and nums:
-                data["masi20"] = nums[0]
-                if len(nums) >= 2:
-                    data["masi20_var"] = nums[1]
-
-            elif is_masi_main and nums:
-                data["masi"] = nums[0]
-                if len(nums) >= 2:
-                    data["masi_var"] = nums[1]
-
-        # Fallback regex si les liens n'ont pas marche
-        if "masi" not in data:
-            text = soup.get_text()
-            m = re.search(r"MASI\s*[®]?\s*Flottant[^\d]*([\d]+[.\d]*)", text)
+        if resp.status_code == 200:
+            text = resp.text
+            # Le HTML contient typiquement :
+            #   INDICE MASI ® Flottant ... 18063.02 ... -0.22
+            # On cherche ce pattern precis
+            # On prend la valeur qui SUIT "MASI ® Flottant" ou "MASI Flottant"
+            m = re.search(
+                r"MASI\s*®?\s*Flottant[^<]*?([\d]{4,6}[.,]?\d*)\s*(?:pts?)?\s*([-+]?\d+[.,]?\d*)?",
+                text,
+                re.IGNORECASE,
+            )
             if m:
                 val = _clean_number(m.group(1))
-                if val and val > 1000:
+                if val and val > 5000:
                     data["masi"] = val
+                    if m.group(2):
+                        data["masi_var"] = _clean_number(m.group(2))
+    except Exception as e:
+        print(f"[scraper] lematin main page error: {e}")
 
-        if "masi20" not in data:
-            text = soup.get_text()
-            m = re.search(r"MASI\s*20[^\d]*([\d]+[.\d]*)", text)
-            if m:
-                val = _clean_number(m.group(1))
-                if val and val > 100:
-                    data["masi20"] = val
+    # ==== PASSE 2 : Page dediee MASI 20 (plus precise) ====
+    try:
+        url = "https://lematin.ma/bourse-de-casablanca/indice/msi-20"
+        resp = session.get(url, timeout=15)
+        if resp.status_code == 200:
+            soup = BeautifulSoup(resp.text, "lxml")
+            text = soup.get_text("\n", strip=True)
 
-        return data if ("masi" in data or "masi20" in data) else None
+            # La page contient dans l'ordre :
+            #   "Valeur" puis la valeur ex "1 354,39"
+            #   "Var.%" puis "-0,29 %"
+            #   "Veille" puis "1 358,29"
+            #   "Ouverture" puis "999,21"
+            #   "+ Haut" puis "1 366,53"
+            #   "+ Bas" puis "1 351,90"
+            #   "Var %" puis "-0,29 %"
+
+            lines = [l.strip() for l in text.split("\n") if l.strip()]
+
+            def _find_next_number(label, after_idx=0, min_val=None, max_val=None):
+                """Trouve le premier nombre apres une ligne contenant label."""
+                for i, line in enumerate(lines[after_idx:], start=after_idx):
+                    if label.lower() in line.lower():
+                        # Chercher dans les 3 lignes qui suivent
+                        for j in range(i + 1, min(i + 4, len(lines))):
+                            val = _clean_number(lines[j])
+                            if val is not None:
+                                if min_val is not None and val < min_val:
+                                    continue
+                                if max_val is not None and val > max_val:
+                                    continue
+                                return val
+                return None
+
+            # Valeur courante (entre 100 et 10000 pour MASI 20)
+            masi20_val = _find_next_number("Valeur", min_val=100, max_val=10000)
+            if masi20_val:
+                data["masi20"] = masi20_val
+
+            # Variation (entre -30% et +30%)
+            var = _find_next_number("Var.%", min_val=-30, max_val=30)
+            if var is not None:
+                data["masi20_var"] = var
+
+            # Veille
+            veille = _find_next_number("Veille", min_val=100, max_val=10000)
+            if veille:
+                data["masi20_veille"] = veille
+
+            # Ouverture
+            ouverture = _find_next_number("Ouverture", min_val=100, max_val=10000)
+            if ouverture:
+                data["masi20_open"] = ouverture
+
+            # Plus Haut
+            haut = _find_next_number("+ Haut", min_val=100, max_val=10000)
+            if haut is None:
+                haut = _find_next_number("Haut", min_val=100, max_val=10000)
+            if haut:
+                data["masi20_high"] = haut
+
+            # Plus Bas
+            bas = _find_next_number("+ Bas", min_val=100, max_val=10000)
+            if bas is None:
+                bas = _find_next_number("Bas", min_val=100, max_val=10000)
+            if bas:
+                data["masi20_low"] = bas
 
     except Exception as e:
-        print(f"[scraper] lematin.ma error: {e}")
-        return None
+        print(f"[scraper] lematin msi-20 page error: {e}")
+
+    # ==== PASSE 3 : Page dediee MASI flottant (pour completer si besoin) ====
+    if "masi" not in data:
+        try:
+            url = "https://lematin.ma/bourse-de-casablanca/indice/masi"
+            resp = session.get(url, timeout=15)
+            if resp.status_code == 200:
+                soup = BeautifulSoup(resp.text, "lxml")
+                text = soup.get_text("\n", strip=True)
+                lines = [l.strip() for l in text.split("\n") if l.strip()]
+
+                for i, line in enumerate(lines):
+                    if "Valeur" in line:
+                        for j in range(i + 1, min(i + 4, len(lines))):
+                            val = _clean_number(lines[j])
+                            if val and val > 5000:
+                                data["masi"] = val
+                                break
+                        break
+        except Exception as e:
+            print(f"[scraper] lematin masi page error: {e}")
+
+    return data if ("masi" in data or "masi20" in data) else None
 
 
 def _get_masi_fallback():
-    """Donnees reelles de la seance du 7 avril 2026 (lematin.ma)."""
+    """Donnees reelles de la seance du 10 avril 2026 (lematin.ma)."""
     return {
-        "masi": 17438.95,
-        "masi_var": -0.91,
-        "masi20": 1308.84,
-        "masi20_var": -0.17,
+        "masi": 18063.02,
+        "masi_var": -0.22,
+        "masi20": 1354.39,
+        "masi20_var": -0.29,
+        "masi20_veille": 1358.29,
+        "masi20_open": 1358.29,  # 999.21 dans lematin.ma semble etre une erreur de leur cote
+        "masi20_high": 1366.53,
+        "masi20_low": 1351.90,
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
 
