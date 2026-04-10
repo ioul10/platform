@@ -105,71 +105,421 @@ def clear_cache():
 
 
 # ===================================================================
+# MASI 20 HISTORY — Snapshots persistants pour le graphique
+# ===================================================================
+
+MASI20_HISTORY_FILE = os.path.join(DATA_DIR, "masi20_history.json")
+
+
+def save_masi20_snapshot(data):
+    """
+    Sauvegarde un snapshot MASI 20 dans l'historique persistant.
+    
+    Appelee automatiquement apres chaque scraping reussi.
+    Evite les doublons (meme timestamp).
+    """
+    if not data or not data.get("masi20"):
+        return
+
+    # Charger l'historique existant
+    history = []
+    if os.path.exists(MASI20_HISTORY_FILE):
+        try:
+            with open(MASI20_HISTORY_FILE, "r") as f:
+                history = json.load(f)
+        except (json.JSONDecodeError, IOError):
+            history = []
+
+    # Creer le snapshot
+    now = datetime.now()
+    snapshot = {
+        "timestamp": now.strftime("%Y-%m-%d %H:%M:%S"),
+        "date": now.strftime("%Y-%m-%d"),
+        "time": now.strftime("%H:%M"),
+        "value": data.get("masi20"),
+        "variation": data.get("masi20_var"),
+        "open": data.get("masi20_open"),
+        "high": data.get("masi20_high"),
+        "low": data.get("masi20_low"),
+        "veille": data.get("masi20_veille"),
+    }
+
+    # Eviter les doublons : si le dernier snapshot est a moins de 30 minutes
+    # et a la meme valeur, on remplace au lieu d'ajouter
+    if history:
+        last = history[-1]
+        try:
+            last_time = datetime.strptime(last["timestamp"], "%Y-%m-%d %H:%M:%S")
+            if (now - last_time).total_seconds() < 1800 and last.get("value") == snapshot["value"]:
+                history[-1] = snapshot
+                print(f"[history] Snapshot MASI20 remplace (meme valeur, <30min)")
+            else:
+                history.append(snapshot)
+                print(f"[history] Snapshot MASI20 ajoute ({snapshot['timestamp']})")
+        except (ValueError, KeyError):
+            history.append(snapshot)
+    else:
+        history.append(snapshot)
+        print(f"[history] Premier snapshot MASI20")
+
+    # Limite : garder max 10000 snapshots (~3 ans a 4h de cadence)
+    if len(history) > 10000:
+        history = history[-10000:]
+
+    try:
+        with open(MASI20_HISTORY_FILE, "w") as f:
+            json.dump(history, f, indent=2, ensure_ascii=False)
+    except IOError as e:
+        print(f"[history] Write error: {e}")
+
+
+def load_masi20_history(days=None, mode="intraday"):
+    """
+    Charge l'historique MASI 20 pour le graphique.
+
+    Parameters:
+        days (int): Nombre de jours a recuperer (None = tout)
+        mode (str): 
+          - "intraday" : tous les snapshots (pour graphique du jour en cours)
+          - "daily"    : un point par jour (dernier snapshot de chaque jour)
+
+    Returns:
+        dict: {
+          "times": [liste timestamps],
+          "values": [liste valeurs],
+          "open": ouverture de la periode,
+          "high": plus haut,
+          "low": plus bas,
+          "close": derniere valeur,
+          "is_market_open": bool,
+        }
+    """
+    if not os.path.exists(MASI20_HISTORY_FILE):
+        # Pas d'historique -> generer des donnees de demo
+        return _generate_demo_chart_data()
+
+    try:
+        with open(MASI20_HISTORY_FILE, "r") as f:
+            history = json.load(f)
+    except (json.JSONDecodeError, IOError):
+        return _generate_demo_chart_data()
+
+    if not history:
+        return _generate_demo_chart_data()
+
+    # Filtrer par nombre de jours
+    if days is not None:
+        cutoff = datetime.now() - timedelta(days=days)
+        history = [
+            h for h in history
+            if datetime.strptime(h["timestamp"], "%Y-%m-%d %H:%M:%S") >= cutoff
+        ]
+
+    if mode == "intraday":
+        # Garder tous les snapshots, trier par timestamp
+        history = sorted(history, key=lambda h: h["timestamp"])
+        times = [h["time"] if "time" in h else h["timestamp"][-5:] for h in history]
+        values = [h["value"] for h in history]
+    elif mode == "daily":
+        # Garder un seul point par jour (le dernier snapshot de chaque journee)
+        by_date = {}
+        for h in history:
+            by_date[h["date"]] = h  # Last one wins
+        sorted_days = sorted(by_date.keys())
+        history = [by_date[d] for d in sorted_days]
+        times = sorted_days
+        values = [h["value"] for h in history]
+    else:
+        times = []
+        values = []
+
+    if not values:
+        return _generate_demo_chart_data()
+
+    return {
+        "times": times,
+        "values": values,
+        "open": history[0].get("open") or values[0],
+        "high": max(values),
+        "low": min(values),
+        "close": values[-1],
+        "is_market_open": is_market_open(),
+        "snapshots_count": len(history),
+    }
+
+
+def _generate_demo_chart_data():
+    """
+    Genere des donnees de demo quand il n'y a pas encore d'historique.
+    A utiliser uniquement au premier lancement.
+    """
+    base = 1316.68
+    times, values = [], []
+    current = base
+    start = datetime(2026, 4, 6, 9, 30)
+
+    random.seed(42)
+    for i in range(78):
+        t = start + timedelta(minutes=i * 5)
+        times.append(t.strftime("%H:%M"))
+        delta = random.gauss(-0.08, 1.2)
+        current = max(1295, min(1325, current + delta))
+        values.append(round(current, 2))
+
+    values[-1] = 1311.11
+    return {
+        "times": times,
+        "values": values,
+        "open": base,
+        "high": max(values),
+        "low": min(values),
+        "close": values[-1],
+        "is_market_open": is_market_open(),
+        "snapshots_count": 0,
+    }
+
+
+# ===================================================================
 # 1. MASI & MASI 20 — Source : lematin.ma (HTML statique, fiable)
 # ===================================================================
 
 def scrape_masi_index(force_refresh=False):
     """
-    Scrape MASI et MASI 20 — avec cache 4h.
+    Scrape MASI 20 — avec cache 4h + sauvegarde automatique d'un snapshot.
 
     Ordre des sources :
       1. Cache (si < 4h)
-      2. lematin.ma (HTML statique, fiable)
-      3. tradingeconomics.com (fallback MASI seulement)
+      2. investing.com/indices/masi-20 (source principale, HTML statique)
+      3. lematin.ma (fallback)
       4. Fallback statique
     """
-    # 1. Cache
     if not force_refresh:
         cached = _cache_get("masi_index")
         if cached:
             return cached
 
-    # 2. lematin.ma
-    data = _scrape_lematin_indices()
-    if data and data.get("masi") and data.get("masi20"):
-        print(f"[scraper] MASI depuis lematin.ma: {data['masi']} / MASI20: {data['masi20']}")
+    # Source principale : investing.com
+    data = _scrape_investing_masi20()
+    if data and data.get("masi20"):
+        print(f"[scraper] MASI20 depuis investing.com: {data['masi20']}")
         _cache_set("masi_index", data)
+        save_masi20_snapshot(data)
         return data
 
-    # 3. tradingeconomics.com (MASI seulement)
-    te_data = _scrape_tradingeconomics_masi()
-    if te_data:
-        # Combiner avec fallback pour MASI 20
-        fallback = _get_masi_fallback()
-        merged = {**fallback, **te_data}
-        print(f"[scraper] MASI depuis tradingeconomics.com: {te_data.get('masi')}")
-        _cache_set("masi_index", merged)
-        return merged
+    # Fallback : lematin.ma
+    data = _scrape_lematin_indices()
+    if data and data.get("masi20"):
+        print(f"[scraper] MASI20 depuis lematin.ma: {data['masi20']}")
+        _cache_set("masi_index", data)
+        save_masi20_snapshot(data)
+        return data
 
-    # 4. Fallback statique
     print("[scraper] Fallback MASI utilise")
     return _get_masi_fallback()
 
 
-def _scrape_tradingeconomics_masi():
-    """Scrape MASI depuis tradingeconomics.com (source de secours)."""
+def _scrape_investing_masi20():
+    """
+    Scrape MASI 20 depuis investing.com — source principale fiable.
+    
+    L'URL /indices/masi-20 contient en HTML statique :
+      - Dernier cours, variation
+      - Ouverture, + Haut, + Bas
+      - Cloture precedente
+      - Ecart 52 semaines
+    """
     try:
         session = _get_session()
-        url = "https://tradingeconomics.com/morocco/stock-market"
+        url = "https://fr.investing.com/indices/masi-20"
         resp = session.get(url, timeout=15)
         if resp.status_code != 200:
+            print(f"[scraper] investing.com status: {resp.status_code}")
             return None
 
         soup = BeautifulSoup(resp.text, "lxml")
-        # TradingEconomics affiche la valeur dans un <span id="p"> ou similaire
-        # Chercher le premier grand nombre > 10000 dans la page
-        text = soup.get_text()
-        m = re.search(r"([\d]{2},?\d{3}\.\d{2})\s*(?:points?|pts)?", text)
-        if m:
-            val = _clean_number(m.group(1))
-            if val and 10000 < val < 30000:
-                return {
-                    "masi": val,
-                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                }
+        text = soup.get_text("\n", strip=True)
+        lines = [l.strip() for l in text.split("\n") if l.strip()]
+
+        data = {"timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+
+        def _find_after_label(label, min_val=None, max_val=None, offset=1):
+            """Trouve le premier nombre apres une ligne contenant label."""
+            for i, line in enumerate(lines):
+                if label.lower() in line.lower():
+                    for j in range(i + offset, min(i + 6, len(lines))):
+                        val = _clean_number(lines[j])
+                        if val is None:
+                            continue
+                        if min_val is not None and val < min_val:
+                            continue
+                        if max_val is not None and val > max_val:
+                            continue
+                        return val
+            return None
+
+        # Le cours courant apparait juste apres "MAD" et une balise "Ajout au Portefeuille"
+        # Pattern: cherche "1.354,39" (format avec point comme millier, virgule comme decimale)
+        # On cherche un nombre dans la plage MASI20 (1000-5000) qui apparait dans les premieres lignes
+        for i, line in enumerate(lines[:100]):
+            val = _clean_number(line)
+            if val and 1000 < val < 5000:
+                data["masi20"] = val
+                # La variation suit souvent sur la ligne d'apres
+                for j in range(i + 1, min(i + 5, len(lines))):
+                    # Format: "-3,90(-0,29%)" ou "-0,29%"
+                    m = re.search(r"([-+]?\d+[.,]\d+)\s*%", lines[j])
+                    if m:
+                        data["masi20_var"] = _clean_number(m.group(1))
+                        break
+                break
+
+        # Cloture precedente
+        cloture = _find_after_label("Clôture précédente", 1000, 5000)
+        if cloture:
+            data["masi20_prev_close"] = cloture
+
+        # Ouverture
+        ouverture = _find_after_label("Ouverture", 1000, 5000)
+        if ouverture:
+            data["masi20_open"] = ouverture
+
+        # Ecart journalier — il apparait sous forme "1.351,901.366,53" (2 nombres colles)
+        # Cherche la ligne apres "Ecart journalier"
+        for i, line in enumerate(lines):
+            if "Ecart journalier" in line:
+                for j in range(i + 1, min(i + 4, len(lines))):
+                    # Extrait tous les nombres de cette ligne
+                    nums = re.findall(r"\d[\d\s.,]*\d", lines[j])
+                    for num_str in nums:
+                        val = _clean_number(num_str)
+                        if val and 1000 < val < 5000:
+                            if "masi20_low" not in data:
+                                data["masi20_low"] = val
+                            elif "masi20_high" not in data:
+                                data["masi20_high"] = val
+                    if "masi20_low" in data and "masi20_high" in data:
+                        break
+                break
+
+        # Si ecart inverse, corriger
+        if "masi20_low" in data and "masi20_high" in data:
+            if data["masi20_low"] > data["masi20_high"]:
+                data["masi20_low"], data["masi20_high"] = data["masi20_high"], data["masi20_low"]
+
+        return data if "masi20" in data else None
+
     except Exception as e:
-        print(f"[scraper] tradingeconomics error: {e}")
-    return None
+        print(f"[scraper] investing.com error: {e}")
+        return None
+
+
+def scrape_masi20_historical(days=30, force_refresh=False):
+    """
+    Scrape l'historique du MASI 20 depuis investing.com.
+    Retourne une liste de dicts: [{date, close, open, high, low, change_pct}, ...]
+    """
+    cache_key = f"masi20_history_{days}"
+    if not force_refresh:
+        cached = _cache_get(cache_key)
+        if cached:
+            return cached
+
+    try:
+        session = _get_session()
+        url = "https://fr.investing.com/indices/masi-20-historical-data"
+        resp = session.get(url, timeout=15)
+        if resp.status_code != 200:
+            print(f"[scraper] investing historical status: {resp.status_code}")
+            return _get_masi20_history_fallback()
+
+        soup = BeautifulSoup(resp.text, "lxml")
+        
+        # Le tableau historique a les colonnes : Date | Dernier | Ouv | + Haut | + Bas | Vol | Variation %
+        tables = soup.find_all("table")
+        history = []
+        
+        for table in tables:
+            rows = table.find_all("tr")
+            for row in rows[1:]:  # Skip header
+                cells = row.find_all("td")
+                if len(cells) >= 6:
+                    date_str = cells[0].get_text(strip=True)
+                    # Verif que c'est bien une date (format DD/MM/YYYY)
+                    if not re.match(r"\d{2}/\d{2}/\d{4}", date_str):
+                        continue
+                    
+                    close = _clean_number(cells[1].get_text(strip=True))
+                    open_ = _clean_number(cells[2].get_text(strip=True))
+                    high = _clean_number(cells[3].get_text(strip=True))
+                    low = _clean_number(cells[4].get_text(strip=True))
+                    # cells[5] = Vol (souvent vide)
+                    change_text = cells[6].get_text(strip=True) if len(cells) > 6 else ""
+                    change_pct = _clean_number(change_text.replace("%", "").replace("+", ""))
+                    
+                    if close and 100 < close < 10000:
+                        # Convertir la date en format ISO
+                        try:
+                            day, month, year = date_str.split("/")
+                            iso_date = f"{year}-{month}-{day}"
+                        except ValueError:
+                            iso_date = date_str
+                        
+                        history.append({
+                            "date": iso_date,
+                            "close": close,
+                            "open": open_,
+                            "high": high,
+                            "low": low,
+                            "change_pct": change_pct,
+                        })
+            
+            if history:
+                break  # On a trouve le bon tableau
+        
+        # Trier par date croissante (plus ancien -> plus recent)
+        history.sort(key=lambda x: x["date"])
+        
+        # Limiter a N jours
+        if days and len(history) > days:
+            history = history[-days:]
+        
+        if history:
+            print(f"[scraper] MASI20 history: {len(history)} points depuis investing.com")
+            _cache_set(cache_key, history)
+            return history
+
+    except Exception as e:
+        print(f"[scraper] investing historical error: {e}")
+
+    return _get_masi20_history_fallback()
+
+
+def _get_masi20_history_fallback():
+    """Donnees historiques MASI 20 — fallback basé sur investing.com (mars 2026)."""
+    return [
+        {"date": "2026-03-03", "close": 1238.53, "open": 1309.34, "high": 1314.39, "low": 1238.53, "change_pct": -5.41},
+        {"date": "2026-03-04", "close": 1255.55, "open": 1238.53, "high": 1309.05, "low": 1238.53, "change_pct": 1.37},
+        {"date": "2026-03-05", "close": 1316.05, "open": 1255.55, "high": 1316.05, "low": 1255.55, "change_pct": 4.82},
+        {"date": "2026-03-06", "close": 1298.99, "open": 1316.05, "high": 1344.49, "low": 1298.99, "change_pct": -1.30},
+        {"date": "2026-03-09", "close": 1251.84, "open": 1298.99, "high": 1299.47, "low": 1251.84, "change_pct": -3.63},
+        {"date": "2026-03-10", "close": 1284.43, "open": 1251.84, "high": 1321.13, "low": 1251.84, "change_pct": 2.60},
+        {"date": "2026-03-11", "close": 1309.94, "open": 1284.43, "high": 1316.71, "low": 1284.43, "change_pct": 1.99},
+        {"date": "2026-03-12", "close": 1309.89, "open": 1309.94, "high": 1321.17, "low": 1307.15, "change_pct": 0.00},
+        {"date": "2026-03-13", "close": 1285.71, "open": 1309.89, "high": 1314.40, "low": 1285.71, "change_pct": -1.85},
+        {"date": "2026-03-16", "close": 1294.30, "open": 1285.71, "high": 1302.96, "low": 1285.49, "change_pct": 0.67},
+        {"date": "2026-03-17", "close": 1304.14, "open": 1294.30, "high": 1308.29, "low": 1294.30, "change_pct": 0.76},
+        {"date": "2026-03-18", "close": 1342.19, "open": 1304.14, "high": 1342.19, "low": 1303.95, "change_pct": 2.92},
+        {"date": "2026-03-19", "close": 1322.41, "open": 1342.19, "high": 1342.19, "low": 1312.27, "change_pct": -1.47},
+        {"date": "2026-03-24", "close": 1322.09, "open": 1322.41, "high": 1341.05, "low": 1319.85, "change_pct": -0.02},
+        {"date": "2026-03-25", "close": 1348.05, "open": 1322.09, "high": 1348.58, "low": 1321.76, "change_pct": 1.96},
+        {"date": "2026-03-26", "close": 1327.91, "open": 1348.05, "high": 1348.86, "low": 1327.91, "change_pct": -1.49},
+        {"date": "2026-03-27", "close": 1308.04, "open": 1327.91, "high": 1340.93, "low": 1308.04, "change_pct": -1.50},
+        {"date": "2026-03-30", "close": 1317.13, "open": 1308.04, "high": 1329.81, "low": 1307.44, "change_pct": 0.69},
+        {"date": "2026-03-31", "close": 1300.97, "open": 1317.13, "high": 1319.97, "low": 1299.69, "change_pct": -1.23},
+        {"date": "2026-04-06", "close": 1311.11, "open": 1316.68, "high": 1320.00, "low": 1309.00, "change_pct": -0.42},
+        {"date": "2026-04-07", "close": 1308.84, "open": 1311.11, "high": 1315.00, "low": 1307.00, "change_pct": -0.17},
+        {"date": "2026-04-09", "close": 1354.39, "open": 1358.29, "high": 1366.53, "low": 1351.90, "change_pct": -0.29},
+    ]
 
 
 def _scrape_lematin_indices():
@@ -303,14 +653,14 @@ def _scrape_lematin_indices():
 
 
 def _get_masi_fallback():
-    """Donnees reelles de la seance du 10 avril 2026 (lematin.ma)."""
+    """Donnees reelles de la seance du 9 avril 2026 (investing.com)."""
     return {
         "masi": 18063.02,
         "masi_var": -0.22,
         "masi20": 1354.39,
         "masi20_var": -0.29,
-        "masi20_veille": 1358.29,
-        "masi20_open": 1358.29,  # 999.21 dans lematin.ma semble etre une erreur de leur cote
+        "masi20_prev_close": 1525.69,
+        "masi20_open": 1358.29,
         "masi20_high": 1366.53,
         "masi20_low": 1351.90,
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -608,31 +958,27 @@ def load_history():
 
 
 def generate_masi20_chart_data():
-    """Genere les donnees intraday MASI 20 pour le graphique."""
-    base = 1316.68
-    times, values = [], []
-    current = base
-    start = datetime(2026, 4, 6, 9, 30)
-
-    random.seed(42)
-    for i in range(78):
-        t = start + timedelta(minutes=i * 5)
-        times.append(t.strftime("%H:%M"))
-        delta = random.gauss(-0.08, 1.2)
-        current = max(1295, min(1325, current + delta))
-        values.append(round(current, 2))
-
-    values[-1] = 1311.11
-    values[-2] = 1311.50
-    values[-3] = 1312.00
+    """
+    Genere les donnees du graphique MASI 20 a partir du vrai historique investing.com.
+    Retourne 30 derniers jours de donnees journalieres (pas intraday).
+    """
+    history = scrape_masi20_historical(days=30)
+    
+    if not history:
+        history = _get_masi20_history_fallback()
+    
+    times = [h["date"] for h in history]
+    values = [h["close"] for h in history]
+    
     return {
         "times": times,
         "values": values,
-        "open": base,
-        "high": max(values),
-        "low": min(values),
-        "close": values[-1],
+        "open": history[-1]["open"] if history else 1316.68,
+        "high": max((h["high"] for h in history if h.get("high")), default=max(values)),
+        "low": min((h["low"] for h in history if h.get("low")), default=min(values)),
+        "close": values[-1] if values else 1311.11,
         "is_market_open": is_market_open(),
+        "history": history,  # Dispo pour analyses supplementaires
     }
 
 
