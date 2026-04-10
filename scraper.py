@@ -4,8 +4,11 @@ scraper.py — Scraper pour le Marché à Terme de la Bourse de Casablanca
 Sources de données (par priorité) :
   1. lematin.ma/bourse-de-casablanca  → MASI, MASI 20, toutes les actions (HTML statique)
   2. boursenews.ma/article/marches/feuille-de-marche → Top 5 hausses/baisses
-  3. futures.casablanca-bourse.com → Contrats Futures (quand disponible)
-  4. Fallback → Données réelles de la 1ère séance (6 avril 2026, source BourseNews)
+  3. tradingeconomics.com/morocco/stock-market → MASI fallback
+  4. futures.casablanca-bourse.com → Contrats Futures (quand disponible)
+  5. Fallback → Données réelles de la 1ère séance (6 avril 2026, source BourseNews)
+
+Cache : 4 heures (14400 secondes) via fichier JSON local
 """
 
 import requests
@@ -17,7 +20,11 @@ from datetime import datetime, timedelta
 import random
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
+CACHE_DIR = os.path.join(DATA_DIR, "cache")
 os.makedirs(DATA_DIR, exist_ok=True)
+os.makedirs(CACHE_DIR, exist_ok=True)
+
+CACHE_TTL_SECONDS = 4 * 60 * 60  # 4 heures
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -50,21 +57,119 @@ def _clean_number(text):
 
 
 # ===================================================================
+# CACHE SYSTEM — 4h TTL
+# ===================================================================
+
+def _cache_get(key):
+    """Recupere une valeur du cache si elle est fraiche (< 4h)."""
+    cache_file = os.path.join(CACHE_DIR, f"{key}.json")
+    if not os.path.exists(cache_file):
+        return None
+    try:
+        with open(cache_file, "r") as f:
+            cached = json.load(f)
+        cached_time = datetime.fromisoformat(cached["_cached_at"])
+        if (datetime.now() - cached_time).total_seconds() < CACHE_TTL_SECONDS:
+            print(f"[cache] HIT {key} (age: {(datetime.now() - cached_time).total_seconds()/60:.0f}min)")
+            return cached["data"]
+        else:
+            print(f"[cache] STALE {key}")
+    except (json.JSONDecodeError, IOError, KeyError, ValueError):
+        pass
+    return None
+
+
+def _cache_set(key, data):
+    """Stocke une valeur dans le cache avec timestamp."""
+    cache_file = os.path.join(CACHE_DIR, f"{key}.json")
+    try:
+        with open(cache_file, "w") as f:
+            json.dump({
+                "_cached_at": datetime.now().isoformat(),
+                "data": data,
+            }, f, indent=2, ensure_ascii=False)
+        print(f"[cache] SET {key}")
+    except IOError as e:
+        print(f"[cache] Write error: {e}")
+
+
+def clear_cache():
+    """Vide le cache — utilise par le bouton 'Rafraichir'."""
+    if os.path.exists(CACHE_DIR):
+        for f in os.listdir(CACHE_DIR):
+            try:
+                os.remove(os.path.join(CACHE_DIR, f))
+            except OSError:
+                pass
+    print("[cache] CLEARED")
+
+
+# ===================================================================
 # 1. MASI & MASI 20 — Source : lematin.ma (HTML statique, fiable)
 # ===================================================================
 
-def scrape_masi_index():
+def scrape_masi_index(force_refresh=False):
     """
-    Scrape MASI et MASI 20 depuis lematin.ma
-    La page contient les indices en HTML statique — pas besoin de JS.
+    Scrape MASI et MASI 20 — avec cache 4h.
+
+    Ordre des sources :
+      1. Cache (si < 4h)
+      2. lematin.ma (HTML statique, fiable)
+      3. tradingeconomics.com (fallback MASI seulement)
+      4. Fallback statique
     """
+    # 1. Cache
+    if not force_refresh:
+        cached = _cache_get("masi_index")
+        if cached:
+            return cached
+
+    # 2. lematin.ma
     data = _scrape_lematin_indices()
     if data and data.get("masi") and data.get("masi20"):
         print(f"[scraper] MASI depuis lematin.ma: {data['masi']} / MASI20: {data['masi20']}")
+        _cache_set("masi_index", data)
         return data
 
+    # 3. tradingeconomics.com (MASI seulement)
+    te_data = _scrape_tradingeconomics_masi()
+    if te_data:
+        # Combiner avec fallback pour MASI 20
+        fallback = _get_masi_fallback()
+        merged = {**fallback, **te_data}
+        print(f"[scraper] MASI depuis tradingeconomics.com: {te_data.get('masi')}")
+        _cache_set("masi_index", merged)
+        return merged
+
+    # 4. Fallback statique
     print("[scraper] Fallback MASI utilise")
     return _get_masi_fallback()
+
+
+def _scrape_tradingeconomics_masi():
+    """Scrape MASI depuis tradingeconomics.com (source de secours)."""
+    try:
+        session = _get_session()
+        url = "https://tradingeconomics.com/morocco/stock-market"
+        resp = session.get(url, timeout=15)
+        if resp.status_code != 200:
+            return None
+
+        soup = BeautifulSoup(resp.text, "lxml")
+        # TradingEconomics affiche la valeur dans un <span id="p"> ou similaire
+        # Chercher le premier grand nombre > 10000 dans la page
+        text = soup.get_text()
+        m = re.search(r"([\d]{2},?\d{3}\.\d{2})\s*(?:points?|pts)?", text)
+        if m:
+            val = _clean_number(m.group(1))
+            if val and 10000 < val < 30000:
+                return {
+                    "masi": val,
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                }
+    except Exception as e:
+        print(f"[scraper] tradingeconomics error: {e}")
+    return None
 
 
 def _scrape_lematin_indices():
@@ -146,16 +251,23 @@ def _get_masi_fallback():
 # 2. TOP MOVERS — Source : boursenews.ma + lematin.ma
 # ===================================================================
 
-def scrape_top_movers():
-    """Scrape top 5 hausses/baisses depuis BourseNews ou lematin.ma."""
+def scrape_top_movers(force_refresh=False):
+    """Scrape top 5 hausses/baisses — avec cache 4h."""
+    if not force_refresh:
+        cached = _cache_get("top_movers")
+        if cached:
+            return cached
+
     data = _scrape_boursenews_movers()
     if data:
         print("[scraper] Top movers depuis boursenews.ma")
+        _cache_set("top_movers", data)
         return data
 
     data = _scrape_lematin_movers()
     if data:
         print("[scraper] Top movers depuis lematin.ma")
+        _cache_set("top_movers", data)
         return data
 
     print("[scraper] Fallback top movers utilise")
@@ -277,8 +389,13 @@ def _get_movers_fallback():
 # 3. FUTURES — Source : futures.casablanca-bourse.com + fallback
 # ===================================================================
 
-def scrape_futures_data():
-    """Scrape les donnees futures depuis futures.casablanca-bourse.com"""
+def scrape_futures_data(force_refresh=False):
+    """Scrape les donnees futures — avec cache 4h."""
+    if not force_refresh:
+        cached = _cache_get("futures_data")
+        if cached:
+            return cached
+
     try:
         session = _get_session()
         url = "https://futures.casablanca-bourse.com/"
@@ -288,11 +405,13 @@ def scrape_futures_data():
             data = _parse_futures_page(soup)
             if data:
                 _save_history(data)
+                _cache_set("futures_data", data)
                 return data
     except Exception as e:
         print(f"[scraper] Futures scrape error: {e}")
 
-    return _get_futures_fallback()
+    fallback = _get_futures_fallback()
+    return fallback
 
 
 def _parse_futures_page(soup):
