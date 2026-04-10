@@ -213,6 +213,15 @@ with col2:
     </div>
     """, unsafe_allow_html=True)
 
+# Graphique journalier (ce que tu as déjà)
+chart = generate_masi20_chart_data()
+# ou directement : scrape_masi20_historical(days=30)
+
+# Graphique intraday (nouveau, accumule dans le temps)
+intraday = load_masi20_history(days=1, mode="intraday")
+# → {"times": ["09:35", "12:05", "15:35"], "values": [1354.39, 1358.12, 1361.45], ...}
+
+
 # ─── Chart Intraday MASI 20 (Dynamique) ───
 st.markdown('<h3 class="section-title">📈 Évolution intraday — MASI 20</h3>', unsafe_allow_html=True)
 
